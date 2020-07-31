@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "iostream": "cpp",
+        "ostream": "cpp"
+    },
+    "python.pythonPath": "C:\\Users\\ToshikiAriga\\anaconda3\\python.exe",
+    "git.ignoreLimitWarning": true
+}
