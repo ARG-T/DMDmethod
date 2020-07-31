@@ -13,14 +13,17 @@ int MOD = 10e7+9;
 int main(){
     int N;
     cin >> N;
-    vector<int> a(N, 0);
-    ll b = 0;
-    rep(i, 0, N){
-        cin >> a[i];
-        b ^= a[i];
+    ll ans = 0;
+    vector<ll> ch(N, 0);
+    rep(i ,0, N){
+        ll a;
+        cin >> a;
+        ch[i] = a;
     }
-    rep(i, 0, N){
-        ll ans = b^a[i];
-        cout << ans << ' ';
+    sort(all(ch));
+    reverse(all(ch));
+    rep(i, 1, N){
+        ans += ch[i/2];
     }
+    cout << ans << endl;
 }
