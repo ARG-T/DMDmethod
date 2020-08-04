@@ -1,5 +1,4 @@
 # import
-# sample_infoから入力を受け取り、ここで遷移の計算
 import math
 import random
 import numpy as np
