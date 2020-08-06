@@ -64,18 +64,16 @@ class DMDmethod:
         return 0
     
     # 振動のエントロピー項
-    # TODO:変数名がわかりにくいので修正
     def vivrations_entropy(self):
-        constant = 3 * const.BOLTZMANN_CONSTANT * self.temperature
+        viv_ene = 3 * const.BOLTZMANN_CONSTANT * self.temperature
         viv_ent_list = self.occupancy * (np.log(self.alpha*(self.thermal_wavelength()**2)/const.PI)-1)
-        return constant * np.sum(viv_ent_list)
+        return viv_ene * np.sum(viv_ent_list)
     
     # 混合のエントロピー項
-    # TODO:変数名がわかりにくいので修正
     def mixed_entropy(self):
-        constant = const.BOLTZMANN_CONSTANT * self.temperature
+        mix_ene = const.BOLTZMANN_CONSTANT * self.temperature
         mix_ent_list = self.occupancy * np.log(self.occupancy) + (1-self.occupancy) * np.log(1-self.occupancy)
-        return constant * np.sum(mix_ent_list)
+        return mix_ene * np.sum(mix_ent_list)
     
     # ドブロイ波長
     def thermal_wavelength(self):
