@@ -16,5 +16,5 @@ def det_structure(inp):
         lat.append((1/2, 1/2, 0))
     # Pは単純
     elif not inp[1] == "P":
-        return "Error! Such name structure not exist!"
+        return False
     return lat
