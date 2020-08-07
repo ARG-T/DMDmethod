@@ -56,7 +56,6 @@ class DMDmethod:
 
     # 初期状態の入力
     def initial_pos(self):
-        i = 0
         for ix in range(self.lat_x+1):
             for iy in range(self.lat_y+1):
                 for iz in range(self.lat_z+1):
@@ -76,8 +75,6 @@ class DMDmethod:
                             self.x_position.append(x)
                             self.y_position.append(y)
                             self.z_position.append(z)
-                            print(i, (x, y, z))
-                            i += 1
                             self.mass.append(random.random())
                             self.alpha.append(random.random())
                             self.occupancy.append(random.random())
@@ -128,7 +125,7 @@ class DMDmethod:
                     + self.electron_density_dependency() \
                     + self.vivrations_entropy() \
                     + self.mixed_entropy()
-        print(free_energy)
+        # print(free_energy)
         return free_energy
 
     # クーロン相互作用
