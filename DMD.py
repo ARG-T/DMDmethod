@@ -119,7 +119,7 @@ class DMDmethod:
         # print(self.Verlet_neighbor_list)
         # print(self.reference_neighbor_list)
 
-    # ψ_ijを求める
+    # w_ijを求める
     # TODO:積分をどうするか？
     def inter_potential_function(self, pos_i, pos_j, alpha_ij):
         return 0
@@ -174,8 +174,7 @@ class DMDmethod:
 
     #  free_energy (reference:(8))
     def DMD_free_energy(self):
-        free_energy = self.atomic_interaction() + self.vivrations_entropy() + \
-            self.mixed_entropy()
+        free_energy = self.atomic_interaction() + self.vivrations_entropy() + self.mixed_entropy()
         # デバッグ用
         # print(free_energy)
         return free_energy
