@@ -48,7 +48,7 @@ class DMDmethod:
         # カットオフ半径(r_cut)
         self.cutoff_radius = 0
         # リスト半径(r_list)
-        self.list_radius = 10.00000001
+        self.list_radius = 0
         # 周期境界条件
         self.x_period = x_period
         self.y_period = y_period
@@ -86,7 +86,7 @@ class DMDmethod:
         self.occupancy = np.array(self.occupancy, dtype=float)
         self.atom_number = len(self.mass)
         self.Verlet_neighbor_list = [0] * (self.atom_number)
-        self.reference_neighbor_list = [0] * (self.atom_number**2)
+        self.reference_neighbor_list = [0] * (self.atom_number**2//2)
 
     # 二原子間の距離
     def two_atoms_distance(self, i, j):
@@ -119,22 +119,42 @@ class DMDmethod:
         # print(self.Verlet_neighbor_list)
         # print(self.reference_neighbor_list)
 
-    #  free_energy (reference:(8))
-    def DMD_free_energy(self):
-        free_energy = self.Coulomb_interaction() \
-                    + self.electron_density_dependency() \
-                    + self.vivrations_entropy() \
-                    + self.mixed_entropy()
-        # print(free_energy)
-        return free_energy
-
-    # クーロン相互作用
-    def Coulomb_interaction(self):
+    # ψ_ijを求める
+    # TODO:積分をどうするか？
+    def inter_potential_function(self, pos_i, pos_j, alpha_ij):
         return 0
 
-    # 電子密度依存項
-    def electron_density_dependency(self):
+    # ψ_ijを求める
+    # TODO:積分をどうするか？
+    def electron_density_function(self, pos_i, pos_j, alpha_ij):
         return 0
+
+    # 近接リストを用いて愚直なO(N^2)より軽くする
+    def atomic_interaction(self):
+        # 原子iに関する二体間ポテンシャルと有効電子密度関数をいれるリスト
+        interbody_potential = np.zeros(self.atom_number, dtype=float)
+        ele_density = np.zeros(self.atom_number, dtype=float)
+        # カットオフ半径内の原子に対してw_ij, psi_ijを求めて足す
+        for i in range(self.atom_number-1):
+            start = self.Verlet_neighbor_list[i]
+            end = self.Verlet_neighbor_list[i+1]
+            sum_inter_potental = 0
+            sum_ele_density = 0
+            if start <= end:
+                for index in range(start, end):
+                    j = self.reference_neighbor_list[index]
+                    dx, dy, dz = self.two_atoms_distance(i, j)
+                    dr = dx**2 + dy**2 + dz**2
+                    # 参考論文では距離を求めなおしているが、
+                    # 近接リスト作成時にcutoffかどうかも確認できるのでは？
+                    # TODO:一旦論文通りに書いてその後最適化させる
+                    if dr < self.cutoff_radius**2:
+                        alpha_ij = (self.alpha[i]*self.alpha[j]) / (self.alpha[i]+self.alpha[j])
+                        sum_inter_potental += self.occupancy[j] * self.inter_potential_function(i, j, alpha_ij)
+                        sum_ele_density += self.occupancy[j] * self.electron_density_function(i, j, alpha_ij)
+            interbody_potential[i] = sum_inter_potental
+            ele_density[i] = sum_ele_density
+        return np.sum(self.occupancy*interbody_potential)/2 + np.sum(self.occupancy*ele_density)
 
     # 振動のエントロピー項
     def vivrations_entropy(self):
@@ -152,11 +172,19 @@ class DMDmethod:
     def thermal_wavelength(self):
         return const.DIRACS_CONSTANT * ((2*const.PI)/(self.mass*const.BOLTZMANN_CONSTANT*self.temperature))**(1/2)
 
+    #  free_energy (reference:(8))
+    def DMD_free_energy(self):
+        free_energy = self.atomic_interaction() + self.vivrations_entropy() + \
+            self.mixed_entropy()
+        # デバッグ用
+        # print(free_energy)
+        return free_energy
+
     # メインループ
     def main_roop(self):
         self.initial_pos()
-        self.DMD_free_energy()
         self.make_Verlet_neighbor_list()
+        self.DMD_free_energy()
         self.sample_print()
 
     def sample_print(self):
