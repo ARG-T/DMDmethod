@@ -48,7 +48,7 @@ class DMDmethod:
         # カットオフ半径(r_cut)
         self.cutoff_radius = 0
         # リスト半径(r_list)
-        self.list_radius = 0
+        self.list_radius = 20.01
         # 周期境界条件
         self.x_period = x_period
         self.y_period = y_period
@@ -86,7 +86,7 @@ class DMDmethod:
         self.occupancy = np.array(self.occupancy, dtype=float)
         self.atom_number = len(self.mass)
         self.Verlet_neighbor_list = [0] * (self.atom_number)
-        self.reference_neighbor_list = [0] * (self.atom_number**2//2)
+        self.reference_neighbor_list = [0] * (self.atom_number*(self.atom_number-1)//2)
 
     # 二原子間の距離
     def two_atoms_distance(self, i, j):
@@ -98,10 +98,10 @@ class DMDmethod:
     # 近接リスト作成
     # 周期境界条件(~period)
     def make_Verlet_neighbor_list(self):
-        nlist = 0
+        nlist = -1
         for i in range(self.atom_number):
             self.Verlet_neighbor_list[i] = nlist+1
-            for j in range(i+1, self.atom_number):
+            for j in range(i, self.atom_number):
                 dx, dy, dz = self.two_atoms_distance(i, j)
                 # x方向の周期境界条件が適用されている
                 if self.x_period:
@@ -132,17 +132,17 @@ class DMDmethod:
     # 近接リストを用いて愚直なO(N^2)より軽くする
     def atomic_interaction(self):
         # 原子iに関する二体間ポテンシャルと有効電子密度関数をいれるリスト
-        interbody_potential = np.zeros(self.atom_number, dtype=float)
-        ele_density = np.zeros(self.atom_number, dtype=float)
+        # numpyはアクセスが微妙なのでlistでアクセスして最後にnumpy.arrayにする
+        interbody_potential_list = [0]*(self.atom_number)
+        ele_density_list = [0]*(self.atom_number)
         # カットオフ半径内の原子に対してw_ij, psi_ijを求めて足す
         for i in range(self.atom_number-1):
             start = self.Verlet_neighbor_list[i]
             end = self.Verlet_neighbor_list[i+1]
-            sum_inter_potental = 0
-            sum_ele_density = 0
+            inter_potential = 0
             if start <= end:
-                for index in range(start, end):
-                    j = self.reference_neighbor_list[index]
+                j_list = self.reference_neighbor_list[start:end]
+                for j in j_list:
                     dx, dy, dz = self.two_atoms_distance(i, j)
                     dr = dx**2 + dy**2 + dz**2
                     # 参考論文では距離を求めなおしているが、
@@ -150,11 +150,12 @@ class DMDmethod:
                     # TODO:一旦論文通りに書いてその後最適化させる
                     if dr < self.cutoff_radius**2:
                         alpha_ij = (self.alpha[i]*self.alpha[j]) / (self.alpha[i]+self.alpha[j])
-                        sum_inter_potental += self.occupancy[j] * self.inter_potential_function(i, j, alpha_ij)
-                        sum_ele_density += self.occupancy[j] * self.electron_density_function(i, j, alpha_ij)
-            interbody_potential[i] = sum_inter_potental
-            ele_density[i] = sum_ele_density
-        return np.sum(self.occupancy*interbody_potential)/2 + np.sum(self.occupancy*ele_density)
+                        inter_potential += self.occupancy[j] * self.inter_potential_function(i, j, alpha_ij)
+                        ele_density = self.electron_density_function(i, j, alpha_ij)
+                        ele_density_list[i] += ele_density
+                        ele_density_list[j] += ele_density
+            interbody_potential_list[i] += inter_potential
+        return np.sum(self.occupancy * (np.array(interbody_potential_list) + np.array(ele_density_list)))
 
     # 振動のエントロピー項
     def vivrations_entropy(self):
