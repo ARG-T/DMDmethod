@@ -93,7 +93,7 @@ class DMDmethod:
         dx = abs(self.x_position[i]-self.x_position[j])
         dy = abs(self.y_position[i]-self.y_position[j])
         dz = abs(self.z_position[i]-self.z_position[j])
-        return (dx, dy, dz)
+        return dx, dy, dz
 
     # 近接リスト作成
     # 周期境界条件(~period)
@@ -149,12 +149,9 @@ class DMDmethod:
                     # 近接リスト作成時にcutoffかどうかも確認できるのでは？
                     # TODO:一旦論文通りに書いてその後最適化させる
                     if dr < self.cutoff_radius**2:
-                        alpha_ij = (
-                            self.alpha[i]*self.alpha[j]) / (self.alpha[i]+self.alpha[j])
-                        inter_potential += self.occupancy[j] * \
-                            self.inter_potential_function(i, j, alpha_ij)
-                        ele_density = self.electron_density_function(
-                            i, j, alpha_ij)
+                        alpha_ij = (self.alpha[i]*self.alpha[j]) / (self.alpha[i]+self.alpha[j])
+                        inter_potential += self.occupancy[j] * self.inter_potential_function(i, j, alpha_ij)
+                        ele_density = self.electron_density_function(i, j, alpha_ij)
                         ele_density_list[i] += ele_density
                         ele_density_list[j] += ele_density
             interbody_potential_list[i] += inter_potential
