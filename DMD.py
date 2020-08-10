@@ -149,9 +149,12 @@ class DMDmethod:
                     # 近接リスト作成時にcutoffかどうかも確認できるのでは？
                     # TODO:一旦論文通りに書いてその後最適化させる
                     if dr < self.cutoff_radius**2:
-                        alpha_ij = (self.alpha[i]*self.alpha[j]) / (self.alpha[i]+self.alpha[j])
-                        inter_potential += self.occupancy[j] * self.inter_potential_function(i, j, alpha_ij)
-                        ele_density = self.electron_density_function(i, j, alpha_ij)
+                        alpha_ij = (
+                            self.alpha[i]*self.alpha[j]) / (self.alpha[i]+self.alpha[j])
+                        inter_potential += self.occupancy[j] * \
+                            self.inter_potential_function(i, j, alpha_ij)
+                        ele_density = self.electron_density_function(
+                            i, j, alpha_ij)
                         ele_density_list[i] += ele_density
                         ele_density_list[j] += ele_density
             interbody_potential_list[i] += inter_potential
