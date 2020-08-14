@@ -221,8 +221,9 @@ class DMDmethod:
                     if dr < self.cutoff_radius**2:
                         j_occ = self.occupancy[j]
                         gamma_ij, gamma_ji = self.jump_frequency(atom_formation_energy[i], atom_formation_energy[j])
-                        occupancy_delta[i] += j_occ*(1-i_occ)*gamma_ji - i_occ*(1-j_occ)*gamma_ij
-                        occupancy_delta[j] += i_occ*(1-j_occ)*gamma_ij - j_occ*(1-i_occ)*gamma_ji
+                        delta = j_occ*(1-i_occ)*gamma_ji - i_occ*(1-j_occ)*gamma_ij
+                        occupancy_delta[i] += delta
+                        occupancy_delta[j] -= delta
         occupancy_delta *= self.time_step
         self.occupancy += occupancy_delta
 
