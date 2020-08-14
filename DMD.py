@@ -46,13 +46,21 @@ class DMDmethod:
         # 参照用リスト
         self.reference_neighbor_list = []
         # カットオフ半径(r_cut)
-        self.cutoff_radius = 0
+        self.cutoff_radius = 20.00001
         # リスト半径(r_list)
         self.list_radius = 20.01
         # 周期境界条件
         self.x_period = x_period
         self.y_period = y_period
         self.z_period = z_period
+        # 易動度
+        self.mobility = 0.00001
+        # 活性化エネルギー
+        self.activation_energy = 0
+        # 時間ステップ
+        self.time_step = 100
+        # ステップ回数
+        self.MAX_STEP = 10
 
     # 初期状態の入力
     def initial_pos(self):
@@ -173,18 +181,58 @@ class DMDmethod:
     def thermal_wavelength(self):
         return const.DIRACS_CONSTANT * ((2*const.PI)/(self.mass*const.BOLTZMANN_CONSTANT*self.temperature))**(1/2)
 
-    #  free_energy (reference:(8))
+    # free_energy (reference:(8))
     def DMD_free_energy(self):
         free_energy = self.atomic_interaction() + self.vivrations_entropy() + self.mixed_entropy()
         # デバッグ用
         # print(free_energy)
         return free_energy
 
+    # 化学ポテンシャル
+    def chemical_potential(self):
+        potencial_list = np.zeros(self.atom_number, dtype=float)
+        return potencial_list
+
+    # 原子形成エネルギー
+    def formation_energy(self):
+        atom_formation_energy = self.chemical_potential() - const.BOLTZMANN_CONSTANT*self.temperature*np.log(self.occupancy/(1-self.occupancy))
+        return atom_formation_energy
+
+    # ジャンプ頻度
+    def jump_frequency(self, f_i, f_j):
+        f_ij = (f_i-f_j)/2
+        gamma_ij = self.mobility * math.exp(-(self.activation_energy+f_ij)/(const.BOLTZMANN_CONSTANT*self.temperature))
+        gamma_ji = self.mobility * math.exp(-(self.activation_energy-f_ij)/(const.BOLTZMANN_CONSTANT*self.temperature))
+        return gamma_ij, gamma_ji
+
+    # 濃度変化
+    def occupancy_change(self):
+        atom_formation_energy = self.formation_energy()
+        occupancy_delta = np.zeros(self.atom_number, dtype=float)
+        for i in range(self.atom_number-1):
+            i_occ = self.occupancy[i]
+            start = self.Verlet_neighbor_list[i]
+            end = self.Verlet_neighbor_list[i+1]
+            if start <= end:
+                j_list = self.reference_neighbor_list[start:end]
+                for j in j_list:
+                    dx, dy, dz = self.two_atoms_distance(i, j)
+                    dr = dx**2 + dy**2 + dz**2
+                    if dr < self.cutoff_radius**2:
+                        j_occ = self.occupancy[j]
+                        gamma_ij, gamma_ji = self.jump_frequency(atom_formation_energy[i], atom_formation_energy[j])
+                        occupancy_delta[i] += j_occ*(1-i_occ)*gamma_ji - i_occ*(1-j_occ)*gamma_ij
+                        occupancy_delta[j] += i_occ*(1-j_occ)*gamma_ij - j_occ*(1-i_occ)*gamma_ji
+        occupancy_delta *= self.time_step
+        self.occupancy += occupancy_delta
+
     # メインループ
     def main_roop(self):
         self.initial_pos()
         self.make_Verlet_neighbor_list()
-        self.DMD_free_energy()
+        for step in range(self.MAX_STEP):
+            self.DMD_free_energy()
+            self.occupancy_change()
         self.sample_print()
 
     def sample_print(self):
