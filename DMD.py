@@ -243,13 +243,9 @@ class DMDmethod:
     def main_roop(self):
         self.initial_pos()
         self.make_Verlet_neighbor_list()
-        print(self.Verlet_neighbor_list)
-        print(self.reference_neighbor_list)
         for step in range(self.MAX_STEP):
             self.DMD_free_energy()
-            print(self.chem_potential)
             self.occupancy_change()
-            print(self.chem_potential)
         self.sample_print()
 
     def sample_print(self):
