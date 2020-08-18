@@ -46,21 +46,23 @@ class DMDmethod:
         # 参照用リスト
         self.reference_neighbor_list = []
         # カットオフ半径(r_cut)
-        self.cutoff_radius = 20.00001
+        self.cutoff_radius = 10.00001
         # リスト半径(r_list)
-        self.list_radius = 20.01
+        self.list_radius = 10.01
         # 周期境界条件
         self.x_period = x_period
         self.y_period = y_period
         self.z_period = z_period
         # 易動度
-        self.mobility = 0.00001
+        self.mobility = 10
         # 活性化エネルギー
-        self.activation_energy = 0
+        self.activation_energy = 100
         # 時間ステップ
         self.time_step = 100
         # ステップ回数
         self.MAX_STEP = 10
+        # 化学ポテンシャル
+        self.chem_potential = []
 
     # 初期状態の入力
     def initial_pos(self):
@@ -109,7 +111,7 @@ class DMDmethod:
         nlist = -1
         for i in range(self.atom_number):
             self.Verlet_neighbor_list[i] = nlist+1
-            for j in range(i, self.atom_number):
+            for j in range(i+1, self.atom_number):
                 dx, dy, dz = self.two_atoms_distance(i, j)
                 # x方向の周期境界条件が適用されている
                 if self.x_period:
@@ -130,24 +132,26 @@ class DMDmethod:
     # w_ijを求める
     # TODO:積分をどうするか？
     def inter_potential_function(self, pos_i, pos_j, alpha_ij):
-        return 0
+        return random.random()
 
     # ψ_ijを求める
     # TODO:積分をどうするか？
     def electron_density_function(self, pos_i, pos_j, alpha_ij):
-        return 0
+        return random.random()
 
     # 近接リストを用いて愚直なO(N^2)より軽くする
+    # F_DMDの第一項と第二項を求めるのがメインだが、同時に化学ポテンシャルも求める
     def atomic_interaction(self):
         # 原子iに関する二体間ポテンシャルと有効電子密度関数をいれるリスト
         # numpyはアクセスが微妙なのでlistでアクセスして最後にnumpy.arrayにする
         interbody_potential_list = [0]*(self.atom_number)
         ele_density_list = [0]*(self.atom_number)
+        self.chem_potential = np.zeros(self.atom_number, dtype=float)
         # カットオフ半径内の原子に対してw_ij, psi_ijを求めて足す
         for i in range(self.atom_number-1):
             start = self.Verlet_neighbor_list[i]
             end = self.Verlet_neighbor_list[i+1]
-            inter_potential = 0
+            inter_potential_sum = 0
             if start <= end:
                 j_list = self.reference_neighbor_list[start:end]
                 for j in j_list:
@@ -158,17 +162,24 @@ class DMDmethod:
                     # TODO:一旦論文通りに書いてその後最適化させる
                     if dr < self.cutoff_radius**2:
                         alpha_ij = (self.alpha[i]*self.alpha[j]) / (self.alpha[i]+self.alpha[j])
-                        inter_potential += self.occupancy[j] * self.inter_potential_function(i, j, alpha_ij)
+                        inter_potential = self.inter_potential_function(i, j, alpha_ij)
+                        self.atomic_interaction_inf(i, j, inter_potential)
+                        inter_potential_sum += self.occupancy[j] * inter_potential
                         ele_density = self.electron_density_function(i, j, alpha_ij)
                         ele_density_list[i] += ele_density
                         ele_density_list[j] += ele_density
             interbody_potential_list[i] += inter_potential
-        return np.sum(self.occupancy * (np.array(interbody_potential_list) + np.array(ele_density_list)))
+        interbody_potential_list = np.array(interbody_potential_list)
+        ele_density_list = np.array(ele_density_list)
+        self.chem_potential += ele_density_list
+        return np.sum(self.occupancy * (interbody_potential_list + ele_density_list))
 
     # 振動のエントロピー項
+    # 同時に化学ポテンシャル
     def vivrations_entropy(self):
         viv_ene = 3 * const.BOLTZMANN_CONSTANT * self.temperature
         viv_ent_list = self.occupancy * (np.log(self.alpha*(self.thermal_wavelength()**2)/const.PI)-1)
+        self.chem_potential += viv_ent_list
         return viv_ene * np.sum(viv_ent_list)
 
     # 混合のエントロピー項
@@ -188,21 +199,22 @@ class DMDmethod:
         # print(free_energy)
         return free_energy
 
-    # 化学ポテンシャル
-    def chemical_potential(self):
-        potencial_list = np.zeros(self.atom_number, dtype=float)
-        return potencial_list
+    # 化学ポテンシャルの第一項用
+    def atomic_interaction_inf(self, i, j, inter_potential):
+        self.chem_potential[i] += self.occupancy[j] * inter_potential
+        self.chem_potential[j] += self.occupancy[i] * inter_potential
+        return
 
     # 原子形成エネルギー
+    # μの4項目がちょうど打ち消し合う
     def formation_energy(self):
-        atom_formation_energy = self.chemical_potential() - const.BOLTZMANN_CONSTANT*self.temperature*np.log(self.occupancy/(1-self.occupancy))
-        return atom_formation_energy
+        return self.chem_potential
 
     # ジャンプ頻度
     def jump_frequency(self, f_i, f_j):
         f_ij = (f_i-f_j)/2
-        gamma_ij = self.mobility * math.exp(-(self.activation_energy+f_ij)/(const.BOLTZMANN_CONSTANT*self.temperature))
-        gamma_ji = self.mobility * math.exp(-(self.activation_energy-f_ij)/(const.BOLTZMANN_CONSTANT*self.temperature))
+        gamma_ij = self.mobility * math.exp(-(self.activation_energy+f_ij) / (const.BOLTZMANN_CONSTANT*self.temperature))
+        gamma_ji = self.mobility * math.exp(-(self.activation_energy-f_ij) / (const.BOLTZMANN_CONSTANT*self.temperature))
         return gamma_ij, gamma_ji
 
     # 濃度変化
@@ -231,9 +243,13 @@ class DMDmethod:
     def main_roop(self):
         self.initial_pos()
         self.make_Verlet_neighbor_list()
+        print(self.Verlet_neighbor_list)
+        print(self.reference_neighbor_list)
         for step in range(self.MAX_STEP):
             self.DMD_free_energy()
+            print(self.chem_potential)
             self.occupancy_change()
+            print(self.chem_potential)
         self.sample_print()
 
     def sample_print(self):
