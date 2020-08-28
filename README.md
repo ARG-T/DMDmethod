@@ -1,9 +1,8 @@
 # DMDmethod
 
 **使い方**
-1. config.pyに試料の情報をinp
-2. crystal_structure.pyに結晶構造をinp
-3. main.pyで実行
+1. csvファイルにinp
+2. main.pyで実行
 
 ***
 **(メモ)**
