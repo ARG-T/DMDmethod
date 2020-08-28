@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import const
+import csv
 
 
 # DMD Class
@@ -16,87 +17,54 @@ class DMDmethod:
     const.DIRACS_CONSTANT = 1.054571817 * (10**(-34))
 
     # init
-    def __init__(self, lat_parameter, lat_x, lat_y, lat_z, atom_position, temperature, mass, x_period, y_period, z_period):
-        # 格子定数
-        # TODO : 立方晶以外のにも対応できるようにする
-        self.lat_parameter = lat_parameter
-        # lat_x --> x軸方向に格子がいくつあるか
-        self.lat_x = lat_x
-        self.lat_y = lat_y
-        self.lat_z = lat_z
-        # 単位格子の数
-        self.lattice_number = self.lat_x * self.lat_y * self.lat_z
-        # 単位格子内の原子の位置
-        self.atom_position = atom_position
-        self.temperature = temperature
-        # 質量のlist
-        self.mass = []
-        # X_i(3方向)
-        self.x_position = []
-        self.y_position = []
-        self.z_position = []
-        # alpha_i
-        self.alpha = []
-        # c_i
-        self.occupancy = []
-        # 原子の個数(initial_pos時に決定)
-        self.atom_number = 0
-        # ベルレリスト
-        self.Verlet_neighbor_list = []
-        # 参照用リスト
-        self.reference_neighbor_list = []
+    # 初期状態も同時にinp
+    def __init__(self):
+        with open("atom_info.csv") as f:
+            reader = csv.reader(f)
+            info = [row for row in reader]
+        
+        self.lat_parameter = float(info[1][0])
+        self.lat_x = int(info[1][1])
+        self.lat_y = int(info[1][2])
+        self.lat_z = int(info[1][3])
+        self.temperature = float(info[1][4])
+        self.x_period = info[1][5]
+        self.y_period = info[1][6]
+        self.z_period = info[1][7]
+        self.atom_number = int(info[1][8])
         # カットオフ半径(r_cut)
-        self.cutoff_radius = 10.00001
+        self.cutoff_radius = float(info[1][9])
         # リスト半径(r_list)
-        self.list_radius = 10.01
-        # 周期境界条件
-        self.x_period = x_period
-        self.y_period = y_period
-        self.z_period = z_period
+        self.list_radius = float(info[1][10])
         # 易動度
-        self.mobility = 10
+        self.mobility = float(info[1][11])
         # 活性化エネルギー
-        self.activation_energy = 100
+        self.activation_energy = float(info[1][12])
         # 時間ステップ
-        self.time_step = 100
+        self.time_step = float(info[1][13])
         # ステップ回数
-        self.MAX_STEP = 10
-        # 化学ポテンシャル
-        self.chem_potential = []
-
-    # 初期状態の入力
-    def initial_pos(self):
-        for ix in range(self.lat_x+1):
-            for iy in range(self.lat_y+1):
-                for iz in range(self.lat_z+1):
-                    for x_pos, y_pos, z_pos in self.atom_position:
-                        x = self.lat_parameter*(ix+x_pos)
-                        y = self.lat_parameter*(iy+y_pos)
-                        z = self.lat_parameter*(iz+z_pos)
-                        # 周期境界条件
-                        # 周期境界条件が満たされる場合(True)は格子を一つ加算したぎりぎりまで、
-                        # 満たされていない場合(False)は微小量を足す(不等号を用いるので)
-                        x_add = 1.0 if self.x_period else 1e-9
-                        y_add = 1.0 if self.y_period else 1e-9
-                        z_add = 1.0 if self.z_period else 1e-9
-                        if (0 <= x < self.lat_parameter*(self.lat_x+x_add) and
-                            0 <= y < self.lat_parameter*(self.lat_y+y_add) and
-                                0 <= z < self.lat_parameter*(self.lat_z+z_add)):
-                            self.x_position.append(x)
-                            self.y_position.append(y)
-                            self.z_position.append(z)
-                            self.mass.append(random.random())
-                            self.alpha.append(random.random())
-                            self.occupancy.append(random.random())
-        self.x_position = np.array(self.x_position, dtype=float)
-        self.y_position = np.array(self.y_position, dtype=float)
-        self.z_position = np.array(self.z_position, dtype=float)
-        self.mass = np.array(self.mass, dtype=float)
-        self.alpha = np.array(self.alpha, dtype=float)
-        self.occupancy = np.array(self.occupancy, dtype=float)
-        self.atom_number = len(self.mass)
+        self.MAX_STEP = int(info[1][14])
+        # ベルレリスト
+        self.Verlet_neighbor_list = [0] * self.atom_number
+        # 参照用リスト
+        self.reference_neighbor_list = [0] * (self.atom_number**2)
+        self.x_position = np.zeros(self.atom_number, dtype=float)
+        self.y_position = np.zeros(self.atom_number, dtype=float)
+        self.z_position = np.zeros(self.atom_number, dtype=float)
+        self.mass = np.zeros(self.atom_number, dtype=float)
+        self.alpha = np.zeros(self.atom_number, dtype=float)
+        self.occupancy = np.zeros(self.atom_number, dtype=float)
         self.Verlet_neighbor_list = [0] * (self.atom_number)
         self.reference_neighbor_list = [0] * (self.atom_number*(self.atom_number-1)//2)
+        for row_num in range(4, 4+self.atom_number):
+            self.x_position[row_num-4] = info[row_num][1]
+            self.y_position[row_num-4] = info[row_num][2]
+            self.z_position[row_num-4] = info[row_num][3]
+            self.mass[row_num-4] = info[row_num][4]
+            self.alpha[row_num-4] = info[row_num][5]
+            self.occupancy[row_num-4] = info[row_num][6]
+        # 化学ポテンシャル
+        self.chem_potential = []
 
     # 二原子間の距離
     def two_atoms_distance(self, i, j):
@@ -241,7 +209,6 @@ class DMDmethod:
 
     # メインループ
     def main_roop(self):
-        self.initial_pos()
         self.make_Verlet_neighbor_list()
         for step in range(self.MAX_STEP):
             self.DMD_free_energy()
