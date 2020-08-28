@@ -1,7 +1,5 @@
 # 実行ファイル
 import DMD
-import crystal_structure
-import config
 
 if __name__ == "__main__":
     lat_parameter, lat_x, lat_y, lat_z, temperature, mass, structure, x_period, y_period, z_period = config.input_info()
