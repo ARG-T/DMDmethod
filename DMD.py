@@ -22,7 +22,7 @@ class DMDmethod:
         with open("atom_info.csv") as f:
             reader = csv.reader(f)
             info = [row for row in reader]
-        
+
         self.lat_parameter = float(info[1][0])
         self.lat_x = int(info[1][1])
         self.lat_y = int(info[1][2])
@@ -44,6 +44,21 @@ class DMDmethod:
         self.time_step = float(info[1][13])
         # ステップ回数
         self.MAX_STEP = int(info[1][14])
+        self.E_1 = float(info[4][0])
+        self.E_2 = float(info[4][1])
+        self.r_1 = float(info[4][2])
+        self.r_2 = float(info[4][3])
+        self.a_1 = float(info[4][4])
+        self.a_2 = float(info[4][5])
+        self.delta = float(info[4][6])
+        self.h = float(info[4][8])
+        self.r_list = [float(info[4][9]), float(info[4][10]), float(info[4][11])]
+        self.S_list = [float(info[4][12]), float(info[4][13]), float(info[4][14])]
+        self.a = float(info[4][15])
+        self.r_3 = float(info[4][16])
+        self.r_4 = float(info[4][17])
+        self.b_1 = float(info[4][18])
+        self.b_2 = float(info[4][19])
         # ベルレリスト
         self.Verlet_neighbor_list = [0] * self.atom_number
         # 参照用リスト
@@ -55,14 +70,15 @@ class DMDmethod:
         self.alpha = np.zeros(self.atom_number, dtype=float)
         self.occupancy = np.zeros(self.atom_number, dtype=float)
         self.Verlet_neighbor_list = [0] * (self.atom_number)
-        self.reference_neighbor_list = [0] * (self.atom_number*(self.atom_number-1)//2)
-        for row_num in range(4, 4+self.atom_number):
-            self.x_position[row_num-4] = info[row_num][1]
-            self.y_position[row_num-4] = info[row_num][2]
-            self.z_position[row_num-4] = info[row_num][3]
-            self.mass[row_num-4] = info[row_num][4]
-            self.alpha[row_num-4] = info[row_num][5]
-            self.occupancy[row_num-4] = info[row_num][6]
+        self.reference_neighbor_list = [
+            0] * (self.atom_number*(self.atom_number-1)//2)
+        for row_num in range(6, 6+self.atom_number):
+            self.x_position[row_num-6] = info[row_num][1]
+            self.y_position[row_num-6] = info[row_num][2]
+            self.z_position[row_num-6] = info[row_num][3]
+            self.mass[row_num-6] = info[row_num][4]
+            self.alpha[row_num-6] = info[row_num][5]
+            self.occupancy[row_num-6] = info[row_num][6]
         # 化学ポテンシャル
         self.chem_potential = []
 
@@ -72,6 +88,10 @@ class DMDmethod:
         dy = abs(self.y_position[i]-self.y_position[j])
         dz = abs(self.z_position[i]-self.z_position[j])
         return dx, dy, dz
+
+    def two_atoms_dist_value(self, i, j):
+        dx, dy, dz = self.two_atoms_distance(i, j)
+        return (dx**2 + dy**2 + dz**2) ** (1/2)
 
     # 近接リスト作成
     # 周期境界条件(~period)
@@ -94,18 +114,24 @@ class DMDmethod:
                     self.reference_neighbor_list[nlist] = j
         self.Verlet_neighbor_list[self.atom_number-1] = nlist+1
         # デバッグ用
-        # print(self.Verlet_neighbor_list)
-        # print(self.reference_neighbor_list)
+        print(self.Verlet_neighbor_list)
+        print(self.reference_neighbor_list)
 
     # w_ijを求める
     # TODO:積分をどうするか？
-    def inter_potential_function(self, pos_i, pos_j, alpha_ij):
+    def inter_potential_function(self, i, j):
         return random.random()
 
     # ψ_ijを求める
     # TODO:積分をどうするか？
-    def electron_density_function(self, pos_i, pos_j, alpha_ij):
-        return random.random()
+    def electron_density_function(self, r):
+        func = self.a * math.exp(-self.b_1*(r-self.r_3)**2) + math.exp(-self.b_2*(r-self.r_4))
+        return func*self.cutoff_function(r)
+
+    def diff_electron_density_function(self, r):
+        func1 = (self.a * (-2*self.b_1*(r-self.r_3)) * math.exp(-self.b_1*(r-self.r_3)**2) - self.b_2 * math.exp(-self.b_2 * (r-self.r_4))) * self.cutoff_function(r)
+        func2 = (self.a * math.exp(-self.b_1*(r-self.r_3)**2) + math.exp(-self.b_2*(r-self.r_4))) * self.diff_cut_off_function(r)
+        return func1 + func2
 
     # 近接リストを用いて愚直なO(N^2)より軽くする
     # F_DMDの第一項と第二項を求めるのがメインだが、同時に化学ポテンシャルも求める
@@ -129,11 +155,15 @@ class DMDmethod:
                     # 近接リスト作成時にcutoffかどうかも確認できるのでは？
                     # TODO:一旦論文通りに書いてその後最適化させる
                     if dr < self.cutoff_radius**2:
-                        alpha_ij = (self.alpha[i]*self.alpha[j]) / (self.alpha[i]+self.alpha[j])
-                        inter_potential = self.inter_potential_function(i, j, alpha_ij)
+                        alpha_ij = (
+                            self.alpha[i]*self.alpha[j]) / (self.alpha[i]+self.alpha[j])
+                        inter_potential = self.inter_potential_function(
+                            i, j, alpha_ij)
                         self.atomic_interaction_inf(i, j, inter_potential)
-                        inter_potential_sum += self.occupancy[j] * inter_potential
-                        ele_density = self.electron_density_function(i, j, alpha_ij)
+                        inter_potential_sum += self.occupancy[j] * \
+                            inter_potential
+                        ele_density = self.electron_density_function(
+                            i, j, alpha_ij)
                         ele_density_list[i] += ele_density
                         ele_density_list[j] += ele_density
             interbody_potential_list[i] += inter_potential
@@ -146,14 +176,17 @@ class DMDmethod:
     # 同時に化学ポテンシャル
     def vivrations_entropy(self):
         viv_ene = 3 * const.BOLTZMANN_CONSTANT * self.temperature
-        viv_ent_list = self.occupancy * (np.log(self.alpha*(self.thermal_wavelength()**2)/const.PI)-1)
+        viv_ent_list = self.occupancy * \
+            (np.log(self.alpha*(self.thermal_wavelength()**2)/const.PI)-1)
         self.chem_potential += viv_ent_list
         return viv_ene * np.sum(viv_ent_list)
 
     # 混合のエントロピー項
     def mixed_entropy(self):
         mix_ene = const.BOLTZMANN_CONSTANT * self.temperature
-        mix_ent_list = self.occupancy * np.log(self.occupancy) + (1-self.occupancy) * np.log(1-self.occupancy)
+        mix_ent_list = self.occupancy * \
+            np.log(self.occupancy) + (1-self.occupancy) * \
+            np.log(1-self.occupancy)
         return mix_ene * np.sum(mix_ent_list)
 
     # ドブロイ波長
@@ -162,10 +195,66 @@ class DMDmethod:
 
     # free_energy (reference:(8))
     def DMD_free_energy(self):
-        free_energy = self.atomic_interaction() + self.vivrations_entropy() + self.mixed_entropy()
+        free_energy = self.atomic_interaction() + self.vivrations_entropy() + \
+            self.mixed_entropy()
         # デバッグ用
         # print(free_energy)
         return free_energy
+
+    def alpha_inter(self, i, j):
+        a_ij = (1/self.alpha[i] + 1/self.alpha[j])**(-1)
+        return a_ij
+
+    def unit_step_function(self, x):
+        return 1 if x >= 1 else 0
+
+    def cutoff_function(self, r):
+        x = (r-self.cutoff_radius)/self.h
+        return x**4/(1+x**4) if x < 0 else 0
+
+    def diff_cut_off_function(self, r):
+        x = (r-self.cutoff_radius)/self.h
+        return 4*x**3/(self.h*(1+(x**4))**2)
+
+    # partial(F_DMD)/partial(X_i)
+    def diff_DMD_X(self, i):
+        return
+
+    def Morse_function(self, r, r_0, alpha):
+        return math.exp(-2*alpha*(r-r_0))-2*math.exp(-alpha*(r-r_0))
+
+    # Morse_functionの微分形
+    def diff_Morse_function(self, r, r_0, alpha):
+        return -2*alpha*(math.exp(-2*alpha*(r-r_0))-math.exp(-alpha*(r-r_0)))
+
+    # 積分する関数1
+    def integral_function_1(self, i, j, r, theta):
+        X = self.two_atoms_dist_value(i, j)
+        diff_xi = (X + math.cos(theta)/(r**2 + X**2 + 2*r*X*math.cos(theta))**(1/2))
+        func1 = self.cutoff_function(r)*(self.diff_Morse_function(r, self.r_1, self.a_1)*self.E_1 + self.diff_Morse_function(r, self.r_2, self.a_2)*self.E_2)
+        func2 = (self.Morse_function(r, self.r_1, self.a_1)*self.E_1 + self.Morse_function(r, self.r_2, self.a_2)*self.E_2 + self.delta) * self.diff_unit_step_function(r)
+        func3 = 0
+        for r_i, S_i in zip(self.r_list, self.S_list):
+            func3 += 4*self.unit_step_function(r_i-r)*S_i*(r_i-r)**3
+        return (func1 + func2 - func3) * diff_xi * math.exp(-self.alpha_inter(i, j)*r**2) * r**2 * math.sin(theta)
+
+    # 積分する関数2
+    def integral_function_2(self, i, j, r, theta):
+        X = self.two_atoms_dist_value(i, j)
+        diff_xi = (X + math.cos(theta)/(r**2 + X**2 + 2*r*X*math.cos(theta))**(1/2))
+        return diff_xi * self.diff_electron_density_function(r)
+
+    # 積分(モンテカルロ法)
+    def Monte_Carlo_integral(self, i, j, r, theta, integral_function):
+        ret = 0
+        trial = 1000
+        for i in range(trial):
+            r_rand = self.cutoff_radius * random.random()
+            theta_rand = 2 * const.PI * random.random()
+            ret += integral_function(i, j, r_rand, theta_rand)
+        ret *= self.cutoff_radius * const.PI
+        ret /= trial
+        return ret
 
     # 化学ポテンシャルの第一項用
     def atomic_interaction_inf(self, i, j, inter_potential):
@@ -181,8 +270,12 @@ class DMDmethod:
     # ジャンプ頻度
     def jump_frequency(self, f_i, f_j):
         f_ij = (f_i-f_j)/2
-        gamma_ij = self.mobility * math.exp(-(self.activation_energy+f_ij) / (const.BOLTZMANN_CONSTANT*self.temperature))
-        gamma_ji = self.mobility * math.exp(-(self.activation_energy-f_ij) / (const.BOLTZMANN_CONSTANT*self.temperature))
+        gamma_ij = self.mobility * \
+            math.exp(-(self.activation_energy+f_ij) /
+                     (const.BOLTZMANN_CONSTANT*self.temperature))
+        gamma_ji = self.mobility * \
+            math.exp(-(self.activation_energy-f_ij) /
+                     (const.BOLTZMANN_CONSTANT*self.temperature))
         return gamma_ij, gamma_ji
 
     # 濃度変化
@@ -200,8 +293,10 @@ class DMDmethod:
                     dr = dx**2 + dy**2 + dz**2
                     if dr < self.cutoff_radius**2:
                         j_occ = self.occupancy[j]
-                        gamma_ij, gamma_ji = self.jump_frequency(atom_formation_energy[i], atom_formation_energy[j])
-                        delta = j_occ*(1-i_occ)*gamma_ji - i_occ*(1-j_occ)*gamma_ij
+                        gamma_ij, gamma_ji = self.jump_frequency(
+                            atom_formation_energy[i], atom_formation_energy[j])
+                        delta = j_occ*(1-i_occ)*gamma_ji - \
+                            i_occ*(1-j_occ)*gamma_ij
                         occupancy_delta[i] += delta
                         occupancy_delta[j] -= delta
         occupancy_delta *= self.time_step
