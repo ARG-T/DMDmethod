@@ -9,6 +9,6 @@ sourceの名前を一致させる!!!
 setup(
     cmdclass = {'build_ext': build_ext},
     ext_modules = [
-                    Extension("c_inte_test", sources=["c_inte_test.pyx"], include_dirs=[numpy.get_include()],)
+                    Extension("c_free_energy", sources=["c_free_energy.pyx"], include_dirs=[numpy.get_include()],)
                     ]
 )
