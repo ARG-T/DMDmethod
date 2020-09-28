@@ -1,5 +1,6 @@
 import math
 import random
+import numpy as np
 
 
 class FreeEnergy:
@@ -10,25 +11,25 @@ class FreeEnergy:
         self.a = 3.80362
         self.b1 = 0.17394
         self.b2 = 5.25661*10**2
-        self.E_list = [2.01458*10**2, 6.59288*10**(-3)]
+        self.E_list = np.array([2.01458*10**2, 6.59288*10**(-3)])
         self.delta = 0.86225*10**(-2)
-        self.alpha_list = [2.97758, 1.54927]
-        self.r0_list_bef = [0.83591, 4.46867]
-        self.r0_list_aft = [-2.19885, -2.61984*10**2]
-        self.S_list = [4.00, 40.00, 1.15*10**3]
-        self.rs_list = [2.24, 1.80, 1.20]
+        self.alpha_list = np.array([2.97758, 1.54927])
+        self.r0_list_bef = np.array([0.83591, 4.46867])
+        self.r0_list_aft = np.array([-2.19885, -2.61984*10**2])
+        self.S_list = np.array([4.00, 40.00, 1.15*10**3])
+        self.rs_list = np.array([2.24, 1.80, 1.20])
         self.F0 = -2.28235
         self.F2 = 1.35535
-        self.qn_list = [-1.27775, -0.86074, 1.78804, 2.97571]
+        self.qn_list = np.array([-1.27775, -0.86074, 1.78804, 2.97571])
         self.Q1 = 0.4000
         self.Q2 = 0.3000
         self.lat_parameter = 4.05
         self.atom_num = 3**3
-        self.x_pos = [0]*self.atom_num
-        self.y_pos = [0]*self.atom_num
-        self.z_pos = [0]*self.atom_num
+        self.x_pos = np.zeros(self.atom_num, dtype=float)
+        self.y_pos = np.zeros(self.atom_num, dtype=float)
+        self.z_pos = np.zeros(self.atom_num, dtype=float)
         self.total_energy = 0
-        self.occupancy = [1]*self.atom_num
+        self.occupancy = np.ones(self.atom_num, dtype=float)
 
     def pos_init(self):
         i = 0
@@ -48,24 +49,23 @@ class FreeEnergy:
 
     def abs_two_atom_dis(self, i, j):
         dx, dy, dz = self.two_atom_dis(i, j)
-        return (dx**2+dy**2+dz**2)**(1/2)
+        return (dx**2+dy**2+dz**2)**0.5
 
     def unit_step_function(self, x):
-        return 1 if x >= 1 else 0
+        return 1.0 if x >= 1 else 0.0
 
     def Morse_function(self, r, r_0, a):
-        func1 = math.exp(-2*a*(r-r_0))
-        func2 = math.exp(-a*(r-r_0))
-        return func1-2*func2
+        ret = math.exp(-2*a*(r-r_0))-2*math.exp(-a*(r-r_0))
+        return ret
 
     def cutoff_function(self, x):
         if x >= 0:
-            return 0
+            return 0.0
         else:
             return x**4/(1+x**4)
 
     def alpha_int(self, i, j):
-        return (1/self.occupancy[i]+1/self.occupancy[j])**(-1)
+        return (1/self.occupancy[i] + 1/self.occupancy[j])**(-1)
 
     # 二体間ポテンシャル
     def pair_potential(self, r):
@@ -92,7 +92,7 @@ class FreeEnergy:
 
     # 積分
     def integral_sympson(self, function, i, j):
-        n, m = 100, 100
+        n, m = 50, 50
         dx = self.rc/(2*n)
         dy = math.pi/(2*m)
         s = 0
@@ -127,51 +127,46 @@ class FreeEnergy:
         s = 0
         X = self.abs_two_atom_dis(i, j)
         alpha = self.alpha_int(i, j)
-        STEP = 100000
+        STEP = 10000
         for _ in range(STEP):
-            x, y = random.random()*self.rc, random.random()*2*math.pi
-            s += self.change_func(function, x, X, y, alpha)*self.rc*2*math.pi
+            x, y = random.random()*self.rc, random.random()*math.pi
+            s += self.change_func(function, x, X, y, alpha)*self.rc*math.pi
 
         return s/STEP
 
     def culc_rho(self, i):
-        ret = 0
+        ret = 0.0
         for j in range(self.atom_num):
             if i == j:
                 continue
             else:
-                ret += self.occupancy[j]*2*math.pi*(self.alpha_int(i, j)/math.pi)**(3/2)*self.integral_sympson(self.electron_density_function, i, j)
+                ret += self.occupancy[j]*2*math.pi*((self.alpha_int(i, j)/math.pi)**1.5)*self.integral_sympson(self.electron_density_function, i, j)
         return ret
 
     def embedding_function(self, rho):
-        ret = 0
+        ret = 0.0
         if rho <= 1:
-            ret += self.F0 + (self.F2*(rho-1)**2)/2
+            ret += self.F0 + (self.F2*(rho-1)**2)*0.5
             for i, qn in enumerate(self.qn_list):
                 ret += qn*(rho-1)**(i+3)
         else:
-            ret += (self.F0 + (self.F2*(rho-1)**2)/2 + self.qn_list[0]*(rho-1)**3 + self.Q1*(rho-1)**4)/(1+self.Q2*(rho-1)**3)
+            ret += (self.F0 + (self.F2*(rho-1)**2)*0.5 + self.qn_list[0]*(rho-1)**3 + (self.Q1*(rho-1)**4)/(1+self.Q2*(rho-1)**3))
         return ret
 
     def culc_total_energy(self):
-        pair, embed = 0, 0
+        pair, embed = 0.0, 0.0
         for i in range(self.atom_num):
             for j in range(self.atom_num):
                 if i == j:
                     continue
-                pair += self.occupancy[i]*self.occupancy[j]*(2*math.pi*(self.alpha_int(i, j)/math.pi)**(3/2)*self.integral_sympson(self.pair_potential, i, j))
+                pair += self.occupancy[i]*self.occupancy[j]*(2*math.pi*((self.alpha_int(i, j)/math.pi)**1.5)*self.integral_sympson(self.pair_potential, i, j))
             rho = self.culc_rho(i)
             embed += self.occupancy[i]*self.embedding_function(rho)
         print(pair)
         print(embed)
-        self.total_energy = pair/2 + embed
+        self.total_energy = pair*0.5 + embed
 
     def main_loop(self):
         self.pos_init()
         self.culc_total_energy()
         print(self.total_energy)
-
-
-if __name__ == "__main__":
-    FE = FreeEnergy()
-    FE.main_loop()
