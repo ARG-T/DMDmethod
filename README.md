@@ -26,7 +26,7 @@
  ```
 
  以下のコマンドの実行
- `python setup.py build_ext --inplace`  
+ `python setup.py build_ext -i`  
 <br>
 
 2. 実行方法
