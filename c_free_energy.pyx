@@ -293,6 +293,7 @@ cdef class FreeEnergy(object):
             self.z_pos[i] += self.sigma
         return gauss_differential_list, x_differential_list, y_differential_list, z_differential_list
     
+    # TODO:最小値に落ち着くまでのwhile roopを追加
     cdef update_info(self):
         cdef double rate = 0.001, after_total_energy
         cdef int i
