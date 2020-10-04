@@ -26,6 +26,9 @@ cdef class FreeEnergy(object):
     cdef public double PI
     cdef public double DIRACS_CONSTANT
     cdef public double current_total_energy
+    cdef public double activation_energy
+    cdef public double frequency_factor
+    cdef public double time_step
     cdef public int atom_num
     cdef public list E_list
     cdef public list alpha_list
@@ -37,9 +40,10 @@ cdef class FreeEnergy(object):
     cdef public double[:] x_pos
     cdef public double[:] y_pos
     cdef public double[:] z_pos
-    cdef public list occupancy
+    cdef public double[:] occupancy
     cdef public double[:] gauss_width
     cdef public list energy_list
+    cdef public double[:] chem_differential_list
 
 
     def __init__(self):
@@ -70,11 +74,17 @@ cdef class FreeEnergy(object):
         self.current_total_energy = 0
         self.sigma = 0.00001
         self.temperature = 10.0
-        self.occupancy = [1.0] * self.atom_num
+        self.occupancy = np.full(self.atom_num, 0.9999)
         self.energy_list = [0.0] * self.atom_num
         self.BOLTZMANN_CONSTANT = 1.380649e-23
         self.PI = math.pi
         self.DIRACS_CONSTANT = 1.054571817e-34
+        self.chem_differential_list = np.zeros(self.atom_num,dtype=float)
+        # TODO:初期値
+        self.activation_energy = 1.0
+        # TODO:初期値
+        self.frequency_factor = 1.0
+        self.time_step = 1.0
 
     # ドブロイ波長
     cdef thermal_wavelength(self):
@@ -296,7 +306,6 @@ cdef class FreeEnergy(object):
     # TODO:最小値に落ち着くまでのwhile roopを追加
     cdef update_info(self):
         cdef double rate = 0.001, after_total_energy
-        cdef int i
         cdef np.ndarray[DOUBLE_t, ndim=1] gauss_differential_list, x_differential_list, y_differential_list, z_differential_list
         gauss_differential_list, x_differential_list, y_differential_list, z_differential_list = self.make_differential_list()
         self.gauss_width -= rate*gauss_differential_list
@@ -306,8 +315,60 @@ cdef class FreeEnergy(object):
         after_total_energy = self.culc_all_total_energy()
         return after_total_energy
 
+    # 中心差分を用いて微分値を出す
+    cdef atom_formation_energy(self):
+        cdef int i
+        cdef double forward_occ, back_occ, k_bT, occ_i
+        k_bT = self.BOLTZMANN_CONSTANT*self.temperature
+        for i in range(self.atom_num):
+            self.occupancy[i] += self.sigma
+            forward_occ = self.culc_total_energy(i)
+            self.occupancy[i] -= 2*self.sigma
+            back_occ = self.culc_total_energy(i)
+            self.occupancy[i] += self.sigma
+            occ_i = self.occupancy[i]
+            self.chem_differential_list[i] = (forward_occ-back_occ)/(2*self.sigma) - k_bT*(math.log(occ_i)-math.log(1-occ_i))    
+        return self.chem_differential_list
+
+    cdef atom_formation_inter(self, i, j):
+        return <double>self.chem_differential_list[i] - <double>self.chem_differential_list[j]
+
+    cdef jump_frequency(self, i, j):
+        cdef double f_ij, gamma_ij, gamma_ji
+        f_ij = self.atom_formation_inter(i, j)
+        gamma_ij = self.frequency_factor * math.exp(-(self.activation_energy-f_ij*0.5)/(self.BOLTZMANN_CONSTANT*self.temperature))
+        gamma_ji = self.frequency_factor * math.exp(-(self.activation_energy+f_ij*0.5)/(self.BOLTZMANN_CONSTANT*self.temperature))
+        return gamma_ij, gamma_ji
+
+    cdef update_concentration(self):
+        cdef int i, j
+        cdef double occ_i, occ_j, ret
+        cdef np.ndarray[DOUBLE_t, ndim=1] change_concent
+        change_concent = np.zeros(self.atom_num, dtype=float)
+        for i in range(self.atom_num):
+            ret = 0
+            occ_i = self.occupancy[i]
+            for j in range(self.atom_num):
+                if i == j:
+                    continue
+                occ_j = self.occupancy[j]
+                gamma_ij, gamma_ji = self.jump_frequency(i, j)
+                ret += (1-occ_i)*occ_j*gamma_ji - (1-occ_j)*occ_i*gamma_ij
+            change_concent[i] = ret
+        self.occupancy += self.time_step * change_concent
+        return change_concent
+
     cpdef main_loop(self):
+        # 初期入力
         self.pos_init()
+        ## while start
+        # 自由エネルギー算出
         self.current_total_energy = self.culc_all_total_energy()
         print(self.current_total_energy)
+        # エネルギーの最小化
         print(self.update_info())
+        # 微分値の生成
+        self.atom_formation_energy()
+        # 濃度時間変化
+        print(self.update_concentration())
+        ## while end
