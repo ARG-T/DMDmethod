@@ -1,4 +1,4 @@
-from c_inte_test import FreeEnergy
+from c_free_energy import FreeEnergy
 import time
 
 
