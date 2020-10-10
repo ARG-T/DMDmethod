@@ -2,6 +2,7 @@ import math
 import random
 import numpy as np
 cimport numpy as np
+import csv
 
 ctypedef np.float64_t DOUBLE_t
 
@@ -66,7 +67,7 @@ cdef class FreeEnergy(object):
         self.Q1 = 0.4000
         self.Q2 = 0.3000
         self.lat_parameter = 4.05
-        self.atom_num = 3**3
+        self.atom_num = 12
         self.x_pos = np.zeros(self.atom_num,dtype=float)
         self.y_pos = np.zeros(self.atom_num,dtype=float)
         self.z_pos = np.zeros(self.atom_num,dtype=float)
@@ -91,16 +92,18 @@ cdef class FreeEnergy(object):
         return <double>self.DIRACS_CONSTANT * ((2*self.PI)/(self.mass*self.BOLTZMANN_CONSTANT*self.temperature))**(0.5)
 
     cdef pos_init(self):
-        cdef int i, x, y, z
-        i = 0
-        for x in range(3):
-            for y in range(3):
-                for z in range(3):
-                    self.x_pos[i] = self.lat_parameter*x
-                    self.y_pos[i] = self.lat_parameter*y
-                    self.z_pos[i] = self.lat_parameter*z
-                    self.gauss_width[i] = 1.0
-                    i += 1
+        cdef int i
+        cdef list info
+        with open("FCC.csv") as f:
+            reader = csv.reader(f)
+            info = [row for row in reader]
+        
+        for i in range(1, self.atom_num+1):
+            self.x_pos[i-1] = float(info[i][1])
+            self.y_pos[i-1] = float(info[i][2])
+            self.z_pos[i-1] = float(info[i][3])
+            self.occupancy[i-1] = float(info[i][4])
+            self.gauss_width[i-1] = float(info[i][5])
 
     cdef two_atom_dis(self, int i, int j):
         cdef double dx, dy, dz
@@ -305,7 +308,7 @@ cdef class FreeEnergy(object):
     
     # TODO:最小値に落ち着くまでのwhile roopを追加
     cdef update_info(self):
-        cdef double rate = 0.001, after_total_energy
+        cdef double rate = 0.1, after_total_energy
         cdef np.ndarray[DOUBLE_t, ndim=1] gauss_differential_list, x_differential_list, y_differential_list, z_differential_list
         gauss_differential_list, x_differential_list, y_differential_list, z_differential_list = self.make_differential_list()
         self.gauss_width -= rate*gauss_differential_list
@@ -330,10 +333,10 @@ cdef class FreeEnergy(object):
             self.chem_differential_list[i] = (forward_occ-back_occ)/(2*self.sigma) - k_bT*(math.log(occ_i)-math.log(1-occ_i))    
         return self.chem_differential_list
 
-    cdef atom_formation_inter(self, i, j):
+    cdef atom_formation_inter(self, int i, int j):
         return <double>self.chem_differential_list[i] - <double>self.chem_differential_list[j]
 
-    cdef jump_frequency(self, i, j):
+    cdef jump_frequency(self, int i, int j):
         cdef double f_ij, gamma_ij, gamma_ji
         f_ij = self.atom_formation_inter(i, j)
         gamma_ij = self.frequency_factor * math.exp(-(self.activation_energy-f_ij*0.5)/(self.BOLTZMANN_CONSTANT*self.temperature))
@@ -368,7 +371,7 @@ cdef class FreeEnergy(object):
         # エネルギーの最小化
         print(self.update_info())
         # 微分値の生成
-        self.atom_formation_energy()
+        # self.atom_formation_energy()
         # 濃度時間変化
-        print(self.update_concentration())
+        # print(self.update_concentration())
         ## while end
