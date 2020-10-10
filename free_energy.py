@@ -240,7 +240,7 @@ class FreeEnergy:
         return gauss_differential_list, x_differential_list, y_differential_list, z_differential_list
 
     def update_info(self):
-        rate = 0.01
+        rate = 0.1
         gauss_differential_list, x_differential_list, y_differential_list, z_differential_list = self.make_differential_list()
         self.gauss_width -= rate*gauss_differential_list
         self.x_pos -= rate*x_differential_list
