@@ -93,7 +93,7 @@ cdef class FreeEnergy(object):
 
     cdef pos_init(self):
         cdef int i
-        cdef list info
+        cdef list info, row
         with open("FCC.csv") as f:
             reader = csv.reader(f)
             info = [row for row in reader]
