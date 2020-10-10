@@ -2,6 +2,7 @@ import math
 import random
 import numpy as np
 import const
+import csv
 
 
 class FreeEnergy:
@@ -31,7 +32,7 @@ class FreeEnergy:
         self.Q1 = 0.4000
         self.Q2 = 0.3000
         self.lat_parameter = 4.05
-        self.atom_num = 3**3
+        self.atom_num = 12
         self.x_pos = np.zeros(self.atom_num, dtype=float)
         self.y_pos = np.zeros(self.atom_num, dtype=float)
         self.z_pos = np.zeros(self.atom_num, dtype=float)
@@ -39,7 +40,7 @@ class FreeEnergy:
         self.total_energy = 0
         self.sigma = 0.00001
         self.temperature = 10
-        self.occupancy = np.ones(self.atom_num, dtype=float)
+        self.occupancy = np.full(self.atom_num, 0.99999)
         self.energy_list = np.zeros(self.atom_num, dtype=float)
 
     # ドブロイ波長
@@ -47,15 +48,16 @@ class FreeEnergy:
         return const.DIRACS_CONSTANT * ((2*const.PI)/(self.mass*const.BOLTZMANN_CONSTANT*self.temperature))**(0.5)
 
     def pos_init(self):
-        i = 0
-        for x in range(3):
-            for y in range(3):
-                for z in range(3):
-                    self.x_pos[i] = self.lat_parameter*x
-                    self.y_pos[i] = self.lat_parameter*y
-                    self.z_pos[i] = self.lat_parameter*z
-                    self.gauss_width[i] = 1
-                    i += 1
+        with open("FCC.csv") as f:
+            reader = csv.reader(f)
+            info = [row for row in reader]
+
+        for i in range(1, self.atom_num+1):
+            self.x_pos[i-1] = float(info[i][1])
+            self.y_pos[i-1] = float(info[i][2])
+            self.z_pos[i-1] = float(info[i][3])
+            self.occupancy[i-1] = float(info[i][4])
+            self.gauss_width[i-1] = float(info[i][5])
 
     def two_atom_dis(self, i, j):
         dx = self.x_pos[i] - self.x_pos[j]
@@ -246,6 +248,17 @@ class FreeEnergy:
         self.z_pos -= rate*z_differential_list
         after_total_energy = self.culc_all_total_energy()
         return after_total_energy
+
+    # 中心差分
+    def culc_chem_potential(self):
+        chem_differential_list = np.zeros(self.atom_num, dtype=float)
+        for i in range(self.atom_num):
+            self.occupancy += self.sigma
+            forward_occ = self.culc_all_total_energy()
+            self.occupancy -= 2*self.sigma
+            back_occ = self.culc_all_total_energy()
+            chem_differential_list[i] = (forward_occ-back_occ)/(2*self.sigma)
+        return chem_differential_list
 
     def main_loop(self):
         self.pos_init()
