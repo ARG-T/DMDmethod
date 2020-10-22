@@ -8,9 +8,9 @@ import csv
 class FreeEnergy:
 
     # const
-    const.BOLTZMANN_CONSTANT = 1.380649 * (10**(-23))
+    const.BOLTZMANN_CONSTANT = 8.6173336 * (10**(-5))
     const.PI = math.pi
-    const.DIRACS_CONSTANT = 1.054571817 * (10**(-34))
+    const.DIRACS_CONSTANT = 6.5821198 * (10**(-16))
 
     def __init__(self):
         self.mass = 63.5*1.66054*(10**(-27))
@@ -31,8 +31,8 @@ class FreeEnergy:
         self.qn_list = [-1.27775, -0.86074, 1.78804, 2.97571]
         self.Q1 = 0.4000
         self.Q2 = 0.3000
-        self.lat_parameter = 4.05
-        self.atom_num = 12
+        self.lat_parameter = 3.61496
+        self.atom_num = 4
         self.x_pos = np.zeros(self.atom_num, dtype=float)
         self.y_pos = np.zeros(self.atom_num, dtype=float)
         self.z_pos = np.zeros(self.atom_num, dtype=float)
@@ -42,10 +42,11 @@ class FreeEnergy:
         self.temperature = 10
         self.occupancy = np.full(self.atom_num, 0.99999)
         self.energy_list = np.zeros(self.atom_num, dtype=float)
+        self.rate = 0.5
 
     # ドブロイ波長
     def thermal_wavelength(self):
-        return const.DIRACS_CONSTANT * ((2*const.PI)/(self.mass*const.BOLTZMANN_CONSTANT*self.temperature))**(0.5)
+        return const.DIRACS_CONSTANT * ((2*const.PI)/(self.mass*const.BOLTZMANN_CONSTANT*self.temperature))**(0.5)*(10**10)
 
     def pos_init(self):
         with open("FCC.csv") as f:
@@ -59,15 +60,21 @@ class FreeEnergy:
             self.occupancy[i-1] = float(info[i][4])
             self.gauss_width[i-1] = float(info[i][5])
 
-    def two_atom_dis(self, i, j):
-        dx = self.x_pos[i] - self.x_pos[j]
-        dy = self.y_pos[i] - self.y_pos[j]
-        dz = self.z_pos[i] - self.z_pos[j]
-        return dx, dy, dz
-
-    def abs_two_atom_dis(self, i, j):
-        dx, dy, dz = self.two_atom_dis(i, j)
-        return (dx**2+dy**2+dz**2)**0.5
+    def abs_two_atom_dis_list(self, i, j):
+        dis_list = []
+        x_pos_i, y_pos_i, z_pos_i = self.x_pos[i], self.y_pos[i], self.z_pos[i]
+        x_pos_j, y_pos_j, z_pos_j = self.x_pos[j], self.y_pos[j], self.z_pos[j]
+        # cutoff半径が格子定数の3倍以内なので余裕をもってx,y,z方向に5つずれた格子まで考える
+        for x in range(-5, 6):
+            for y in range(-5, 6):
+                for z in range(-5, 6):
+                    dx = x_pos_i - (x_pos_j + x*self.lat_parameter)
+                    dy = y_pos_i - (y_pos_j + y*self.lat_parameter)
+                    dz = z_pos_i - (z_pos_j + z*self.lat_parameter)
+                    dr_2 = dx**2+dy**2+dz**2
+                    if 0 < dr_2 <= self.rc**2:
+                        dis_list.append(dr_2**(0.5))
+        return dis_list
 
     def Morse_function(self, r, r_0, a):
         exp_val = math.exp(-a*(r-r_0))
@@ -113,33 +120,35 @@ class FreeEnergy:
         dx = self.rc/(2*n)
         dy = math.pi/(2*m)
         s = 0
-        X = self.abs_two_atom_dis(i, j)
+        X_list = self.abs_two_atom_dis_list(i, j)
         alpha = self.alpha_int(i, j)
-        # r
-        for i in range(n):
-            x = 2*i*dx
-            x1 = x+dx
-            x2 = x+2*dx
-            sy1, sy2, sy3 = 0, 0, 0
-            # theta
-            for j in range(m):
-                y = 2*j*dy
-                y1 = y+dy
-                y2 = y+2*dy
+        for X in X_list:
+            # r
+            for i_r in range(n):
+                x = 2*i_r*dx
+                x1 = x+dx
+                x2 = x+2*dx
+                sy1, sy2, sy3 = 0, 0, 0
+                # theta
+                for j_theta in range(m):
+                    y = 2*j_theta*dy
+                    y1 = y+dy
+                    y2 = y+2*dy
 
-                s1 = ((self.change_func(function, x, X, y, alpha) + 4 * self.change_func(function, x, X, y1, alpha) + self.change_func(function, x, X, y2, alpha))/3)*dy
-                s2 = ((self.change_func(function, x1, X, y, alpha) + 4 * self.change_func(function, x1, X, y1, alpha) + self.change_func(function, x1, X, y2, alpha))/3)*dy
-                s3 = ((self.change_func(function, x2, X, y, alpha) + 4 * self.change_func(function, x2, X, y1, alpha) + self.change_func(function, x2, X, y2, alpha))/3)*dy
+                    s1 = (self.change_func(function, x, X, y, alpha) + 4 * self.change_func(function, x, X, y1, alpha) + self.change_func(function, x, X, y2, alpha))*dy/3
+                    s2 = (self.change_func(function, x1, X, y, alpha) + 4 * self.change_func(function, x1, X, y1, alpha) + self.change_func(function, x1, X, y2, alpha))*dy/3
+                    s3 = (self.change_func(function, x2, X, y, alpha) + 4 * self.change_func(function, x2, X, y1, alpha) + self.change_func(function, x2, X, y2, alpha))*dy/3
 
-                sy1 += s1
-                sy2 += s2
-                sy3 += s3
+                    sy1 += s1
+                    sy2 += s2
+                    sy3 += s3
 
-            sx = ((sy1+4*sy2+sy3)/3)*dx
-            s += sx
+                sx = (sy1+4*sy2+sy3)*dx/3
+                s += sx
 
         return s
 
+    """
     def integral_monte_carlo(self, function, i, j):
         s = 0
         X = self.abs_two_atom_dis(i, j)
@@ -150,14 +159,12 @@ class FreeEnergy:
             s += self.change_func(function, x, X, y, alpha)*self.rc*math.pi
 
         return s/STEP
+    """
 
     def culc_rho(self, i):
         ret = 0.0
         for j in range(self.atom_num):
-            if i == j:
-                continue
-            else:
-                ret += self.occupancy[j]*2*math.pi*((self.alpha_int(i, j)/math.pi)**1.5)*self.integral_sympson(self.electron_density_function, i, j)
+            ret += self.occupancy[j]*2*math.pi*((self.alpha_int(i, j)/math.pi)**1.5)*self.integral_sympson(self.electron_density_function, i, j)
         return ret
 
     def embedding_function(self, rho):
@@ -174,13 +181,11 @@ class FreeEnergy:
     def culc_VG_energy(self, i):
         pair = 0.0
         for j in range(self.atom_num):
-            if i == j:
-                continue
-            pair += self.occupancy[i]*self.occupancy[j]*(2*math.pi*((self.alpha_int(i, j)/math.pi)**1.5)*self.integral_sympson(self.pair_potential, i, j))
+            pair += self.occupancy[j]*(2*math.pi*((self.alpha_int(i, j)/math.pi)**1.5)*self.integral_sympson(self.pair_potential, i, j))
         rho = self.culc_rho(i)
-        embed = self.occupancy[i]*self.embedding_function(rho)
+        embed = self.embedding_function(rho)
         vib_entropy = math.log(self.gauss_width[i]*(self.thermal_wavelength()**2)/math.pi)-1
-        return pair*0.5 + embed + 1.5*const.BOLTZMANN_CONSTANT*self.temperature*vib_entropy
+        return self.occupancy[i]*(pair*0.5 + embed + 1.5*const.BOLTZMANN_CONSTANT*self.temperature*vib_entropy)
 
     def mixed_entropy(self, i):
         occ_i = self.occupancy[i]
@@ -240,13 +245,28 @@ class FreeEnergy:
         return gauss_differential_list, x_differential_list, y_differential_list, z_differential_list
 
     def update_info(self):
-        rate = 0.1
-        gauss_differential_list, x_differential_list, y_differential_list, z_differential_list = self.make_differential_list()
-        self.gauss_width -= rate*gauss_differential_list
-        self.x_pos -= rate*x_differential_list
-        self.y_pos -= rate*y_differential_list
-        self.z_pos -= rate*z_differential_list
-        after_total_energy = self.culc_all_total_energy()
+        while True:
+            gauss_differential_list, x_differential_list, y_differential_list, z_differential_list = self.make_differential_list()
+            self.gauss_width -= self.rate*gauss_differential_list
+            self.x_pos -= self.rate*x_differential_list
+            self.y_pos -= self.rate*y_differential_list
+            self.z_pos -= self.rate*z_differential_list
+            print(self.rate, self.gauss_width, self.x_pos, self.y_pos, self.z_pos)
+            after_total_energy = self.culc_all_total_energy()
+            print(after_total_energy)
+            if after_total_energy > self.current_total_energy:
+                self.gauss_width += self.rate*gauss_differential_list
+                self.x_pos += self.rate*x_differential_list
+                self.y_pos += self.rate*y_differential_list
+                self.z_pos += self.rate*z_differential_list
+                self.rate *= 0.9
+                print("continue")
+                continue
+            if abs(after_total_energy-self.current_total_energy) < 0.001:
+                print("break")
+                break
+            print("normal")
+            self.current_total_energy = after_total_energy
         return after_total_energy
 
     # 中心差分
@@ -264,4 +284,4 @@ class FreeEnergy:
         self.pos_init()
         self.current_total_energy = self.culc_all_total_energy()
         print(self.current_total_energy)
-        print(self.update_info())
+        # self.update_info()
