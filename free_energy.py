@@ -8,46 +8,47 @@ import csv
 class FreeEnergy:
 
     # const
-    const.BOLTZMANN_CONSTANT = 8.6173336 * (10**(-5))
+    const.BOLTZMANN_CONSTANT = 8.6173336 * (10**(-5))   # eV/K
     const.PI = math.pi
-    const.DIRACS_CONSTANT = 6.5821198 * (10**(-16))
+    const.DIRACS_CONSTANT = 6.5821198 * (10**(-16))     # eV*s
 
     def __init__(self):
-        self.mass = 63.5*1.66054*(10**(-27))
-        self.rc = 5.50679
-        self.h = 0.50037
-        self.a = 3.80362
-        self.b1 = 0.17394
-        self.b2 = 5.25661*10**2
-        self.E_list = [2.01458*10**2, 6.59288*10**(-3)]
-        self.delta = 0.86225*10**(-2)
-        self.alpha_list = [2.97758, 1.54927]
-        self.r0_list_bef = [0.83591, 4.46867]
-        self.r0_list_aft = [-2.19885, -2.61984*10**2]
-        self.S_list = [4.00, 40.00, 1.15*10**3]
-        self.rs_list = [2.24, 1.80, 1.20]
-        self.F0 = -2.28235
-        self.F2 = 1.35535
-        self.qn_list = [-1.27775, -0.86074, 1.78804, 2.97571]
-        self.Q1 = 0.4000
-        self.Q2 = 0.3000
-        self.lat_parameter = 3.61496
-        self.atom_num = 4
-        self.x_pos = np.zeros(self.atom_num, dtype=float)
-        self.y_pos = np.zeros(self.atom_num, dtype=float)
-        self.z_pos = np.zeros(self.atom_num, dtype=float)
-        self.gauss_width = np.zeros(self.atom_num, dtype=float)
-        self.total_energy = 0
-        self.sigma = 0.00001
-        self.temperature = 10
-        self.occupancy = np.full(self.atom_num, 0.99999)
-        self.energy_list = np.zeros(self.atom_num, dtype=float)
-        self.rate = 0.5
+        self.mass = 63.5*1.66054*(10**(-27))    # kg
+        self.rc = 5.50679   # オングストローム(以下A)
+        self.h = 0.50037    # A
+        self.a = 3.80362    # None
+        self.b1 = 0.17394   # /A^2
+        self.b2 = 5.25661*10**2 # /A^1
+        self.E_list = [2.01458*10**2, 6.59288*10**(-3)] # eV
+        self.delta = 0.86225*10**(-2)   # A
+        self.alpha_list = [2.97758, 1.54927]    # /A
+        self.r0_list_bef = [0.83591, 4.46867]   # A
+        self.r0_list_aft = [-2.19885, -2.61984*10**2]   # A
+        self.S_list = [4.00, 40.00, 1.15*10**3] # eV/A^4
+        self.rs_list = [2.24, 1.80, 1.20]   # A
+        self.F0 = -2.28235  # eV
+        self.F2 = 1.35535   # eV
+        self.qn_list = [-1.27775, -0.86074, 1.78804, 2.97571]   # eV
+        self.Q1 = 0.4000    # None
+        self.Q2 = 0.3000    # None
+        self.lat_parameter = 3.61496    # A
+        self.atom_num = 4   # None
+        self.x_pos = np.zeros(self.atom_num, dtype=float)   # A
+        self.y_pos = np.zeros(self.atom_num, dtype=float)   # A
+        self.z_pos = np.zeros(self.atom_num, dtype=float)   # A
+        self.gauss_width = np.zeros(self.atom_num, dtype=float) # /A^2  
+        self.total_energy = 0   # eV
+        self.sigma = 0.00001    # None
+        self.temperature = 10   # K
+        self.occupancy = np.full(self.atom_num, 0.99999)    # None
+        self.energy_list = np.zeros(self.atom_num, dtype=float) # eV
+        self.rate = 0.5 # None
 
-    # ドブロイ波長
+    # ドブロイ波長 (A)
     def thermal_wavelength(self):
         return const.DIRACS_CONSTANT * ((2*const.PI)/(self.mass*const.BOLTZMANN_CONSTANT*self.temperature))**(0.5)*(10**10)
 
+    # 初期配置入力
     def pos_init(self):
         with open("FCC.csv") as f:
             reader = csv.reader(f)
@@ -60,6 +61,7 @@ class FreeEnergy:
             self.occupancy[i-1] = float(info[i][4])
             self.gauss_width[i-1] = float(info[i][5])
 
+    # 同等の位置を考慮しつつ二つの原子の距離(A)を返す
     def abs_two_atom_dis_list(self, i, j):
         dis_list = []
         x_pos_i, y_pos_i, z_pos_i = self.x_pos[i], self.y_pos[i], self.z_pos[i]
@@ -76,17 +78,20 @@ class FreeEnergy:
                         dis_list.append(dr_2**(0.5))
         return dis_list
 
+    # Morse function(unit : None)
     def Morse_function(self, r, r_0, a):
         exp_val = math.exp(-a*(r-r_0))
         ret = exp_val**2-2*exp_val
         return ret
 
+    # cutoff function (unit:None)
     def cutoff_function(self, x):
         if x >= 0:
             return 0.0
         else:
             return x**4/(1+x**4)
 
+    # DMD原著(12) (/A^2)
     def alpha_int(self, i, j):
         return (1/self.gauss_width[i] + 1/self.gauss_width[j])**(-1)
 
