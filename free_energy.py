@@ -1,5 +1,5 @@
 import math
-import random
+# import random
 import numpy as np
 import const
 import csv
@@ -18,7 +18,7 @@ class FreeEnergy:
         self.h = 0.50037    # A
         self.a = 3.80362    # None
         self.b1 = 0.17394   # /A^2
-        self.b2 = 5.25661*10**2 # /A^1
+        self.b2 = 5.35661*10**2 # /A^1
         self.E_list = [2.01458*10**2, 6.59288*10**(-3)] # eV
         self.delta = 0.86225*10**(-2)   # A
         self.alpha_list = [2.97758, 1.54927]    # /A
@@ -89,7 +89,7 @@ class FreeEnergy:
         if x >= 0:
             return 0.0
         else:
-            return x**4/(1+x**4)
+            return (x**4)/(1+x**4)
 
     # DMD原著(12) (/A^2)
     def alpha_int(self, i, j):
@@ -179,7 +179,7 @@ class FreeEnergy:
             for i, qn in enumerate(self.qn_list):
                 ret += qn*(rho-1)**(i+3)
         else:
-            ret += (self.F0 + (self.F2*(rho-1)**2)*0.5 + self.qn_list[0]*(rho-1)**3 + (self.Q1*(rho-1)**4)/(1+self.Q2*(rho-1)**3))
+            ret += (self.F0 + (self.F2*(rho-1)**2)*0.5 + self.qn_list[0]*(rho-1)**3 + self.Q1*(rho-1)**4)/(1+self.Q2*(rho-1)**3)
         return ret
 
     # 勾配計算時に混合のエントロピーを呼び出さないようにする
