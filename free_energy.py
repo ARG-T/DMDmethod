@@ -18,13 +18,13 @@ class FreeEnergy:
         self.h = 0.50037    # A
         self.a = 3.80362    # None
         self.b1 = 0.17394   # /A^2
-        self.b2 = 5.35661*10**2 # /A^1
-        self.E_list = [2.01458*10**2, 6.59288*10**(-3)] # eV
+        self.b2 = 5.35661*10**2     # /A^1
+        self.E_list = [2.01458*10**2, 6.59288*10**(-3)]     # eV
         self.delta = 0.86225*10**(-2)   # A
         self.alpha_list = [2.97758, 1.54927]    # /A
         self.r0_list_bef = [0.83591, 4.46867]   # A
         self.r0_list_aft = [-2.19885, -2.61984*10**2]   # A
-        self.S_list = [4.00, 40.00, 1.15*10**3] # eV/A^4
+        self.S_list = [4.00, 40.00, 1.15*10**3]     # eV/A^4
         self.rs_list = [2.24, 1.80, 1.20]   # A
         self.F0 = -2.28235  # eV
         self.F2 = 1.35535   # eV
@@ -36,17 +36,17 @@ class FreeEnergy:
         self.x_pos = np.zeros(self.atom_num, dtype=float)   # A
         self.y_pos = np.zeros(self.atom_num, dtype=float)   # A
         self.z_pos = np.zeros(self.atom_num, dtype=float)   # A
-        self.gauss_width = np.zeros(self.atom_num, dtype=float) # /A^2  
+        self.gauss_width = np.zeros(self.atom_num, dtype=float)     # /A^2
         self.total_energy = 0   # eV
         self.sigma = 0.00001    # None
         self.temperature = 10   # K
-        self.occupancy = np.full(self.atom_num, 0.99999)    # None
-        self.energy_list = np.zeros(self.atom_num, dtype=float) # eV
-        self.rate = 0.5 # None
+        self.occupancy = np.zeros(self.atom_num, dtype=float)   # None
+        self.energy_list = np.zeros(self.atom_num, dtype=float)     # eV
+        self.rate = 0.5     # None
 
     # ドブロイ波長 (A)
     def thermal_wavelength(self):
-        return const.DIRACS_CONSTANT * ((2*const.PI)/(self.mass*const.BOLTZMANN_CONSTANT*self.temperature))**(0.5)*(10**10)
+        return 10**10*const.DIRACS_CONSTANT*(2*const.PI/(self.mass*const.BOLTZMANN_CONSTANT*self.temperature))**0.5
 
     # 初期配置入力
     def pos_init(self):
@@ -114,16 +114,16 @@ class FreeEnergy:
         return (func1+func2)*self.cutoff_function((r-self.rc)/self.h)
 
     def change_coo(self, r, x, theta):
-        return r**2+x**2+2*r*x*math.cos(theta)
+        return (r**2+x**2+2*r*x*math.cos(theta))**0.5
 
     def change_func(self, function, r, X, theta, alpha):
-        return function(self.change_coo(r, X, theta))*(r**2)*2*math.sin(theta)*math.exp(-alpha*(r**2))
+        return function(self.change_coo(r, X, theta))*(r**2)*math.sin(theta)*math.exp(-alpha*(r**2))
 
     # 積分
     def integral_sympson(self, function, i, j):
         n, m = 50, 50
         dx = self.rc/(2*n)
-        dy = math.pi/(2*m)
+        dy = const.PI/(2*m)
         s = 0
         X_list = self.abs_two_atom_dis_list(i, j)
         alpha = self.alpha_int(i, j)
@@ -169,7 +169,7 @@ class FreeEnergy:
     def culc_rho(self, i):
         ret = 0.0
         for j in range(self.atom_num):
-            ret += self.occupancy[j]*2*math.pi*((self.alpha_int(i, j)/math.pi)**1.5)*self.integral_sympson(self.electron_density_function, i, j)
+            ret += self.occupancy[j]*2*const.PI*((self.alpha_int(i, j)/const.PI)**1.5)*self.integral_sympson(self.electron_density_function, i, j)
         return ret
 
     def embedding_function(self, rho):
@@ -186,10 +186,10 @@ class FreeEnergy:
     def culc_VG_energy(self, i):
         pair = 0.0
         for j in range(self.atom_num):
-            pair += self.occupancy[j]*(2*math.pi*((self.alpha_int(i, j)/math.pi)**1.5)*self.integral_sympson(self.pair_potential, i, j))
+            pair += self.occupancy[j]*(2*const.PI*((self.alpha_int(i, j)/const.PI)**1.5)*self.integral_sympson(self.pair_potential, i, j))
         rho = self.culc_rho(i)
         embed = self.embedding_function(rho)
-        vib_entropy = math.log(self.gauss_width[i]*(self.thermal_wavelength()**2)/math.pi)-1
+        vib_entropy = math.log(self.gauss_width[i]*(self.thermal_wavelength()**2)/const.PI)-1
         return self.occupancy[i]*(pair*0.5 + embed + 1.5*const.BOLTZMANN_CONSTANT*self.temperature*vib_entropy)
 
     def mixed_entropy(self, i):
