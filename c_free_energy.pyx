@@ -238,7 +238,7 @@ cdef class FreeEnergy(object):
             for i, qn in enumerate(self.qn_list):
                 ret += qn*(rho-1)**(i+3)
         else:
-            ret += self.F0 + (self.F2*(rho-1)**2)*0.5 + self.qn_list[0]*(rho-1)**3 + <double>(self.Q1*(rho-1)**4)/(1+self.Q2*(rho-1)**3)
+            ret += (self.F0 + (self.F2*(rho-1)**2)*0.5 + self.qn_list[0]*(rho-1)**3 + self.Q1*(rho-1)**4)/(1+self.Q2*(rho-1)**3)
         return ret
 
     cdef culc_VG_energy(self, int i):
@@ -325,7 +325,10 @@ cdef class FreeEnergy(object):
             self.z_pos -= self.rate*z_differential_list
             after_total_energy = self.culc_all_total_energy()
             print(after_total_energy)
-            if after_total_energy > self.current_total_energy:
+            if abs(after_total_energy-self.current_total_energy) < 0.001:
+                print("break")
+                break
+            elif after_total_energy > self.current_total_energy:
                 self.gauss_width += self.rate*gauss_differential_list
                 self.x_pos += self.rate*x_differential_list
                 self.y_pos += self.rate*y_differential_list
@@ -333,11 +336,8 @@ cdef class FreeEnergy(object):
                 self.rate *= 0.75
                 print("continue")
                 continue
-            if abs(after_total_energy-self.current_total_energy) < 0.001:
-                print("break")
-                break
             self.current_total_energy = after_total_energy
-        return after_total_energy
+        return
 
     # 中心差分を用いて微分値を出す
     cdef atom_formation_energy(self):
@@ -390,7 +390,7 @@ cdef class FreeEnergy(object):
         self.current_total_energy = self.culc_all_total_energy()
         print(self.current_total_energy)
         # エネルギーの最小化
-        #print(self.update_info())
+        self.update_info()
         # 微分値の生成
         # self.atom_formation_energy()
         # 濃度時間変化

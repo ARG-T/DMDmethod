@@ -42,7 +42,7 @@ class FreeEnergy:
         self.temperature = 10   # K
         self.occupancy = np.zeros(self.atom_num, dtype=float)   # None
         self.energy_list = np.zeros(self.atom_num, dtype=float)     # eV
-        self.rate = 0.5     # None
+        self.rate = 0.1     # None
 
     # ドブロイ波長 (A)
     def thermal_wavelength(self):
@@ -259,7 +259,10 @@ class FreeEnergy:
             print(self.rate, self.gauss_width, self.x_pos, self.y_pos, self.z_pos)
             after_total_energy = self.culc_all_total_energy()
             print(after_total_energy)
-            if after_total_energy > self.current_total_energy:
+            if abs(after_total_energy-self.current_total_energy) < 0.001:
+                print("break")
+                break
+            elif after_total_energy > self.current_total_energy:
                 self.gauss_width += self.rate*gauss_differential_list
                 self.x_pos += self.rate*x_differential_list
                 self.y_pos += self.rate*y_differential_list
@@ -267,9 +270,6 @@ class FreeEnergy:
                 self.rate *= 0.9
                 print("continue")
                 continue
-            if abs(after_total_energy-self.current_total_energy) < 0.001:
-                print("break")
-                break
             print("normal")
             self.current_total_energy = after_total_energy
         return after_total_energy
@@ -289,4 +289,4 @@ class FreeEnergy:
         self.pos_init()
         self.current_total_energy = self.culc_all_total_energy()
         print(self.current_total_energy)
-        # self.update_info()
+        self.update_info()
