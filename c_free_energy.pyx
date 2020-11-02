@@ -3,6 +3,7 @@ import random
 import numpy as np
 cimport numpy as np
 import csv
+import time
 
 ctypedef np.float64_t DOUBLE_t
 
@@ -50,9 +51,9 @@ cdef class FreeEnergy(object):
     cdef public double[:] mixed_list
     cdef public double[:] vib_ent_list
     cdef public double[:] energy_list
+    cdef public double[:] VG_energy_list
     cdef public list reference_neighbor_list
     cdef public list Verlet_neighbor_list
-    cdef public double[:] chem_differential_list
 
     def __cinit__(self):
         self.mass = 1.0544429e-25
@@ -80,7 +81,7 @@ cdef class FreeEnergy(object):
         self.z_pos = np.zeros(self.atom_num,dtype=float)
         self.gauss_width = np.zeros(self.atom_num,dtype=float)
         self.current_total_energy = 0
-        self.sigma = 0.00001
+        self.sigma = 1e-10
         self.temperature = 0.1
         self.rho_list = np.zeros(self.atom_num, dtype=float)
         self.pair_list = np.zeros(self.atom_num, dtype=float)
@@ -89,12 +90,12 @@ cdef class FreeEnergy(object):
         self.vib_ent_list = np.zeros(self.atom_num, dtype=float)
         self.occupancy = np.zeros(self.atom_num,dtype=float)
         self.energy_list = np.zeros(self.atom_num, dtype=float)
+        self.VG_energy_list = np.zeros(self.atom_num, dtype=float)
         self.BOLTZMANN_CONSTANT = 8.6173336e-5
         self.PI = math.pi
         self.DIRACS_CONSTANT = 6.5821198e-16
-        self.reference_neighbor_list = [0]*(self.atom_num**2//2)
-        self.Verlet_neighbor_list = [0]*self.atom_num
-        self.chem_differential_list = np.zeros(self.atom_num,dtype=float)
+        self.reference_neighbor_list = [0]*(self.atom_num**2)
+        self.Verlet_neighbor_list = [0]*(self.atom_num+1)
         # TODO:初期値
         self.activation_energy = 1.0
         # TODO:初期値
@@ -144,12 +145,14 @@ cdef class FreeEnergy(object):
         nlist = -1      # 0-indexed
         for i in range(self.atom_num):
             self.Verlet_neighbor_list[i] = nlist+1
-            for j in range(i+1, self.atom_num):
+            for j in range(self.atom_num):
+                if i == j:
+                    continue
                 dr2 = self.abs_two_atom_distance(i, j)
                 if dr2 <= (self.rc)**2:
                     nlist += 1
                     self.reference_neighbor_list[nlist] = j
-        self.Verlet_neighbor_list[self.atom_num-1] = nlist+1
+        self.Verlet_neighbor_list[self.atom_num] = nlist+1
 
     cdef Morse_function(self, double r, double r_0, double a):
         cdef double exp_val, ret
@@ -198,7 +201,7 @@ cdef class FreeEnergy(object):
     cdef integral_sympson(self, function, int i, int j):
         cdef int n, m, i_r, j_theta
         cdef double dx, dy, s, X, alpha, x, x1, x2, sy1, sy2, sy3, y, y1, y2, sx
-        n, m = 50, 50
+        n, m = 30, 30
         dx = self.rc/(2*n)
         dy = self.PI/(2*m)
         s = 0
@@ -255,50 +258,46 @@ cdef class FreeEnergy(object):
             ret += (self.F0 + (self.F2*(rho-1)**2)*0.5 + self.qn_list[0]*(rho-1)**3 + self.Q1*(rho-1)**4)/(1+self.Q2*(rho-1)**3)
         return ret
 
-    cdef culc_VG_energy(self, int i, int start, int end):
+    cdef mixed_entropy(self, int i):
+        cdef double occ_i
+        occ_i = self.occupancy[i]
+        return <double>self.BOLTZMANN_CONSTANT*self.temperature*(occ_i*math.log(occ_i) + (1-occ_i)*math.log(1-occ_i))
+
+    cdef culc_VG_energy(self, int i):
+        cdef int start, end
         cdef list j_list
         cdef int j
-        cdef double base_pair, base_rho, occ_i, occ_j, occ_inter
+        cdef double base_pair, base_rho, occ_i, occ_j, occ_inter, pair_i, rho_i, embed_i, vib_ent, VG_energy_i, alpha_int
         occ_i = self.occupancy[i]
+        vib_ent = occ_i*math.log((self.gauss_width[i]*self.thermal_wavelength()**2)/self.PI-1)
+        start = self.Verlet_neighbor_list[i]
+        end = self.Verlet_neighbor_list[i+1]
+        # 条件に合わないものはここで弾く
+        if start > end:
+            return 0
+        pair_i = 0
+        rho_i = 0
         j_list = self.reference_neighbor_list[start:end]
         for j in j_list:
             occ_j = self.occupancy[j]
-            occ_inter = occ_i*occ_j
-            # pair_listの作成
-            base_pair = 2*self.PI*((self.alpha_int(i, j)/self.PI)**1.5)*self.integral_sympson(self.pair_potential, i, j)
-            self.pair_list[i] += occ_inter*base_pair
-            self.pair_list[j] += occ_inter*base_pair
-            # rho_listの作成
-            base_rho = 2*self.PI*((self.alpha_int(i, j)/self.PI)**1.5)*self.integral_sympson(self.electron_density_function, i, j)
-            self.rho_list[i] += occ_inter*base_rho
-            self.rho_list[j] += occ_inter*base_rho
-        # embed_listの作成
-        self.embed_list[i] = self.embedding_function(self.rho_list[i])
-
-    cdef mixed_entropy(self, int i):
-        return <double>self.BOLTZMANN_CONSTANT*self.temperature*(self.occupancy[i]*math.log(self.occupancy[i]) + (1-self.occupancy[i])*math.log(1-self.occupancy[i]))
-
-    cdef culc_all_VG_energy(self):
-        cdef int i, start, end
-        for i in range(self.atom_num-1):
-            start = self.Verlet_neighbor_list[i]
-            end = self.Verlet_neighbor_list[i+1]
-            # 条件に合わないものはここで弾く
-            if start > end:
-                continue
-            self.culc_VG_energy(i, start, end)
+            alpha_int = self.alpha_int(i, j)
+            base_pair = 2*self.PI*((alpha_int/self.PI)**1.5)*self.integral_sympson(self.pair_potential, i, j)
+            pair_i += occ_j*base_pair
+            base_rho = 2*self.PI*((alpha_int/self.PI)**1.5)*self.integral_sympson(self.electron_density_function, i, j)
+            rho_i += occ_j*base_rho
+        embed_i = self.embedding_function(rho_i)
         # VG_energyの算出
-        return 0.5*np.sum(self.pair_list) + np.sum(self.embed_list) + 1.5*self.BOLTZMANN_CONSTANT*self.temperature*np.sum(self.vib_ent_list)
+        VG_energy_i = 0.5*pair_i + embed_i + 1.5*self.BOLTZMANN_CONSTANT*self.temperature*vib_ent
+        return VG_energy_i
   
     cdef culc_all_total_energy(self):
         cdef double VG_energy, mixed_energy
         cdef int i
         for i in range(self.atom_num):
-            # vib_ent_listの作成
-            self.vib_ent_list[i] = self.occupancy[i]*math.log((self.gauss_width[i]*self.thermal_wavelength()**2)/self.PI-1)
+            self.VG_energy_list[i] = self.occupancy[i]*self.culc_VG_energy(i)
             # mixed_ent_listの作成
             self.mixed_list[i] = self.mixed_entropy(i)
-        VG_energy = self.culc_all_VG_energy()
+        VG_energy = np.sum(self.VG_energy_list)
         # mixed_entropy_listの作成と総和
         mixed_energy = np.sum(self.mixed_list)
         return VG_energy + mixed_energy
@@ -316,33 +315,33 @@ cdef class FreeEnergy(object):
             # ガウス幅
             # base+sigma
             self.gauss_width[i] += self.sigma
-            forward_gauss = self.culc_all_VG_energy()
+            forward_gauss = self.culc_VG_energy(i)
             # base-sigma
             self.gauss_width[i] -= 2*self.sigma
-            back_gauss = self.culc_all_VG_energy()
-            gauss_differential_list[i] = (forward_gauss-back_gauss)/(2*self.sigma)
+            back_gauss = self.culc_VG_energy(i)
+            gauss_differential_list[i] = (forward_gauss-back_gauss)/self.sigma
             # baseに戻す
             self.gauss_width[i] += self.sigma
             # 位置(x)
             self.x_pos[i] += self.sigma
-            forward_x = self.culc_all_VG_energy()
+            forward_x = self.culc_VG_energy(i)
             self.x_pos[i] -= 2*self.sigma
-            back_x = self.culc_all_VG_energy()
-            x_differential_list[i] = (forward_x-back_x)/(2*self.sigma)
+            back_x = self.culc_VG_energy(i)
+            x_differential_list[i] = (forward_x-back_x)/self.sigma
             self.x_pos[i] += self.sigma
             # 位置(y)
             self.y_pos[i] += self.sigma
-            forward_y = self.culc_all_VG_energy()
+            forward_y = self.culc_VG_energy(i)
             self.y_pos[i] -= 2*self.sigma
-            back_y = self.culc_all_VG_energy()
-            y_differential_list[i] = (forward_y-back_y)/(2*self.sigma)
+            back_y = self.culc_VG_energy(i)
+            y_differential_list[i] = (forward_y-back_y)/self.sigma
             self.y_pos[i] += self.sigma
             # 位置(z)
             self.z_pos[i] += self.sigma
-            forward_z = self.culc_all_VG_energy()
+            forward_z = self.culc_VG_energy(i)
             self.z_pos[i] -= 2*self.sigma
-            back_z = self.culc_all_VG_energy()
-            z_differential_list[i] = (forward_z-back_z)/(2*self.sigma)
+            back_z = self.culc_VG_energy(i)
+            z_differential_list[i] = (forward_z-back_z)/self.sigma
             self.z_pos[i] += self.sigma
         return gauss_differential_list, x_differential_list, y_differential_list, z_differential_list
 
@@ -356,7 +355,7 @@ cdef class FreeEnergy(object):
             self.y_pos -= self.rate*y_differential_list
             self.z_pos -= self.rate*z_differential_list
             after_total_energy = self.culc_all_total_energy()
-            print(after_total_energy)
+            print(after_total_energy/self.atom_num)
             if abs(after_total_energy-self.current_total_energy) < 0.001:
                 print("break")
                 break
@@ -369,22 +368,19 @@ cdef class FreeEnergy(object):
                 print("continue")
                 continue
             self.current_total_energy = after_total_energy
-        return
 
-    # 中心差分を用いて微分値を出す
+    # 微分値を出す
     cdef atom_formation_energy(self):
         cdef int i
         cdef double forward_occ, back_occ, k_bT, occ_i
+        cdef np.ndarray[DOUBLE_t, ndim=1] chem_differential_list
+        chem_differential_list = np.zeros(self.atom_num,dtype=float)
         k_bT = self.BOLTZMANN_CONSTANT*self.temperature
         for i in range(self.atom_num):
-            self.occupancy[i] += self.sigma
-            forward_occ = self.culc_total_energy(i)
-            self.occupancy[i] -= 2*self.sigma
-            back_occ = self.culc_total_energy(i)
-            self.occupancy[i] += self.sigma
             occ_i = self.occupancy[i]
-            self.chem_differential_list[i] = (forward_occ-back_occ)/(2*self.sigma) - k_bT*(math.log(occ_i)-math.log(1-occ_i))    
-        return self.chem_differential_list
+            diff_VG = self.culc_VG_energy(i)
+            chem_differential_list[i] = diff_VG
+        return chem_differential_list
 
     cdef atom_formation_inter(self, int i, int j):
         return <double>self.chem_differential_list[i] - <double>self.chem_differential_list[j]
@@ -423,9 +419,9 @@ cdef class FreeEnergy(object):
         self.current_total_energy = self.culc_all_total_energy()
         print(self.current_total_energy/self.atom_num)
         # エネルギーの最小化
-        # self.update_info()
+        self.update_info()
         # 微分値の生成
-        # self.atom_formation_energy()
+        print(self.atom_formation_energy())
         # 濃度時間変化
         # print(self.update_concentration())
         ## while end
