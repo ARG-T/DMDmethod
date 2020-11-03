@@ -402,7 +402,7 @@ cdef class FreeEnergy(object):
                 gamma_ij, gamma_ji = self.jump_frequency(i, j)
                 ret += (1-occ_i)*occ_j*gamma_ji - (1-occ_j)*occ_i*gamma_ij
             change_concent[i] = ret
-        self.occupancy += self.time_step*self.change_concent
+        self.occupancy += self.time_step*change_concent
 
     cpdef main_loop(self):
         # 初期入力
