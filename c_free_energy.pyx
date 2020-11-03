@@ -82,7 +82,7 @@ cdef class FreeEnergy(object):
         self.gauss_width = np.zeros(self.atom_num,dtype=float)
         self.current_total_energy = 0
         self.sigma = 1e-10
-        self.temperature = 0.1
+        self.temperature = 500
         self.rho_list = np.zeros(self.atom_num, dtype=float)
         self.pair_list = np.zeros(self.atom_num, dtype=float)
         self.embed_list = np.zeros(self.atom_num, dtype=float)
@@ -97,15 +97,19 @@ cdef class FreeEnergy(object):
         self.reference_neighbor_list = [0]*(self.atom_num**2)
         self.Verlet_neighbor_list = [0]*(self.atom_num+1)
         # TODO:初期値
-        self.activation_energy = 1.0
+        self.activation_energy = 2.041761       # eV
         # TODO:初期値
-        self.frequency_factor = 1.0
-        self.time_step = 1.0
+        self.frequency_factor = 3.58128*10**14
+        self.time_step = 0.000001
         self.rate = 0.1
 
     # ドブロイ波長
     cdef thermal_wavelength(self):
-        return <double>10**10*self.DIRACS_CONSTANT * (2*self.PI/(self.mass*self.BOLTZMANN_CONSTANT*self.temperature))**0.5
+        cdef double planck, boltzman, ret
+        planck = 6.62607015E-34
+        boltzman = 1.380649E-23
+        ret = 10**10*planck/((2*self.PI*self.mass*boltzman*self.temperature)**0.5)
+        return ret
 
     # 初期配置入力
     cdef pos_init(self):
@@ -261,7 +265,7 @@ cdef class FreeEnergy(object):
     cdef mixed_entropy(self, int i):
         cdef double occ_i
         occ_i = self.occupancy[i]
-        return <double>self.BOLTZMANN_CONSTANT*self.temperature*(occ_i*math.log(occ_i) + (1-occ_i)*math.log(1-occ_i))
+        return <double>occ_i*math.log(occ_i) + (1-occ_i)*math.log(1-occ_i)
 
     cdef culc_VG_energy(self, int i):
         cdef int start, end
@@ -269,7 +273,7 @@ cdef class FreeEnergy(object):
         cdef int j
         cdef double base_pair, base_rho, occ_i, occ_j, occ_inter, pair_i, rho_i, embed_i, vib_ent, VG_energy_i, alpha_int
         occ_i = self.occupancy[i]
-        vib_ent = occ_i*math.log((self.gauss_width[i]*self.thermal_wavelength()**2)/self.PI-1)
+        vib_ent = math.log((self.gauss_width[i]*self.thermal_wavelength()**2)/self.PI)-1
         start = self.Verlet_neighbor_list[i]
         end = self.Verlet_neighbor_list[i+1]
         # 条件に合わないものはここで弾く
@@ -299,7 +303,7 @@ cdef class FreeEnergy(object):
             self.mixed_list[i] = self.mixed_entropy(i)
         VG_energy = np.sum(self.VG_energy_list)
         # mixed_entropy_listの作成と総和
-        mixed_energy = np.sum(self.mixed_list)
+        mixed_energy = self.BOLTZMANN_CONSTANT*self.temperature*np.sum(self.mixed_list)
         return VG_energy + mixed_energy
 
     # 中心差分により勾配を求める
@@ -369,21 +373,8 @@ cdef class FreeEnergy(object):
                 continue
             self.current_total_energy = after_total_energy
 
-    # 微分値を出す
-    cdef atom_formation_energy(self):
-        cdef int i
-        cdef double forward_occ, back_occ, k_bT, occ_i
-        cdef np.ndarray[DOUBLE_t, ndim=1] chem_differential_list
-        chem_differential_list = np.zeros(self.atom_num,dtype=float)
-        k_bT = self.BOLTZMANN_CONSTANT*self.temperature
-        for i in range(self.atom_num):
-            occ_i = self.occupancy[i]
-            diff_VG = self.culc_VG_energy(i)
-            chem_differential_list[i] = diff_VG
-        return chem_differential_list
-
     cdef atom_formation_inter(self, int i, int j):
-        return <double>self.chem_differential_list[i] - <double>self.chem_differential_list[j]
+        return self.VG_energy_list[i] - self.VG_energy_list[j]
 
     cdef jump_frequency(self, int i, int j):
         cdef double f_ij, gamma_ij, gamma_ji
@@ -398,30 +389,32 @@ cdef class FreeEnergy(object):
         cdef np.ndarray[DOUBLE_t, ndim=1] change_concent
         change_concent = np.zeros(self.atom_num, dtype=float)
         for i in range(self.atom_num):
+            start = self.Verlet_neighbor_list[i]
+            end = self.Verlet_neighbor_list[i+1]
+            # 条件に合わないものはここで弾く
+            if start > end:
+                return 0
             ret = 0
             occ_i = self.occupancy[i]
-            for j in range(self.atom_num):
-                if i == j:
-                    continue
+            j_list = self.reference_neighbor_list[start:end]
+            for j in j_list:
                 occ_j = self.occupancy[j]
                 gamma_ij, gamma_ji = self.jump_frequency(i, j)
                 ret += (1-occ_i)*occ_j*gamma_ji - (1-occ_j)*occ_i*gamma_ij
             change_concent[i] = ret
-        self.occupancy += self.time_step * change_concent
-        return change_concent
+        self.occupancy += self.time_step*self.change_concent
 
     cpdef main_loop(self):
         # 初期入力
         self.pos_init()
         self.make_Verlet_neighbor_list()
         ## while start
-        # 自由エネルギー算出
-        self.current_total_energy = self.culc_all_total_energy()
-        print(self.current_total_energy/self.atom_num)
-        # エネルギーの最小化
-        self.update_info()
-        # 微分値の生成
-        print(self.atom_formation_energy())
-        # 濃度時間変化
-        # print(self.update_concentration())
+        while True:
+            # 自由エネルギー算出
+            self.current_total_energy = self.culc_all_total_energy()
+            print(self.current_total_energy/self.atom_num)
+            # エネルギーの最小化
+            self.update_info()
+            # 濃度時間変化
+            self.update_concentration()
         ## while end
