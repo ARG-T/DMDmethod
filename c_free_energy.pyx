@@ -1,9 +1,10 @@
-import math
 import random
 import numpy as np
 cimport numpy as np
 import csv
 import time
+import atom_info_input
+from libc.math cimport sin, cos, log, exp, M_PI
 
 ctypedef np.float64_t DOUBLE_t
 
@@ -55,7 +56,7 @@ cdef class FreeEnergy(object):
     cdef public list reference_neighbor_list
     cdef public list Verlet_neighbor_list
 
-    def __cinit__(self):
+    def __cinit__(self, lat_parameter, temperature):
         self.mass = 1.0544429e-25
         self.rc = 5.50679
         self.h = 0.50037
@@ -74,7 +75,7 @@ cdef class FreeEnergy(object):
         self.qn_list = [-1.27775, -0.86074, 1.78804, 2.97571]
         self.Q1 = 0.4000
         self.Q2 = 0.3000
-        self.lat_parameter = 3.61496
+        self.lat_parameter = lat_parameter
         self.atom_num = 108
         self.x_pos = np.zeros(self.atom_num,dtype=float)
         self.y_pos = np.zeros(self.atom_num,dtype=float)
@@ -82,7 +83,7 @@ cdef class FreeEnergy(object):
         self.gauss_width = np.zeros(self.atom_num,dtype=float)
         self.current_total_energy = 0
         self.sigma = 1e-10
-        self.temperature = 500
+        self.temperature = temperature
         self.rho_list = np.zeros(self.atom_num, dtype=float)
         self.pair_list = np.zeros(self.atom_num, dtype=float)
         self.embed_list = np.zeros(self.atom_num, dtype=float)
@@ -92,7 +93,7 @@ cdef class FreeEnergy(object):
         self.energy_list = np.zeros(self.atom_num, dtype=float)
         self.VG_energy_list = np.zeros(self.atom_num, dtype=float)
         self.BOLTZMANN_CONSTANT = 8.6173336e-5
-        self.PI = math.pi
+        self.PI = M_PI
         self.DIRACS_CONSTANT = 6.5821198e-16
         self.reference_neighbor_list = [0]*(self.atom_num**2)
         self.Verlet_neighbor_list = [0]*(self.atom_num+1)
@@ -160,7 +161,7 @@ cdef class FreeEnergy(object):
 
     cdef Morse_function(self, double r, double r_0, double a):
         cdef double exp_val, ret
-        exp_val = math.exp(-a*(r-r_0))
+        exp_val = exp(-a*(r-r_0))
         ret = exp_val**2-2*exp_val
         return ret
 
@@ -191,21 +192,21 @@ cdef class FreeEnergy(object):
     # 電子密度関数
     cpdef electron_density_function(self, double r):
         cdef double func1, func2
-        func1 = self.a*math.exp(-self.b1*(r-self.r0_list_aft[0])**2)
-        func2 = math.exp(-self.b2*(r-self.r0_list_aft[1]))
+        func1 = self.a*exp(-self.b1*(r-self.r0_list_aft[0])**2)
+        func2 = exp(-self.b2*(r-self.r0_list_aft[1]))
         return (func1+func2)*self.cutoff_function(<double>(r-self.rc)/self.h)
 
     cdef change_coo(self, double r, double x, double theta):
-        return <double>(r**2+x**2+2*r*x*math.cos(theta))**0.5
+        return <double>(r**2+x**2+2*r*x*cos(theta))**0.5
 
     cdef change_func(self, function, double r, double X, double theta, double alpha):
-        return <double>function(self.change_coo(r, X, theta))*(r**2)*math.sin(theta)*math.exp(-alpha*(r**2))
+        return <double>function(self.change_coo(r, X, theta))*(r**2)*sin(theta)*exp(-alpha*(r**2))
 
     # 積分
     cdef integral_sympson(self, function, int i, int j):
         cdef int n, m, i_r, j_theta
         cdef double dx, dy, s, X, alpha, x, x1, x2, sy1, sy2, sy3, y, y1, y2, sx
-        n, m = 30, 30
+        n, m = 55*2, 31*2
         dx = self.rc/(2*n)
         dy = self.PI/(2*m)
         s = 0
@@ -265,7 +266,7 @@ cdef class FreeEnergy(object):
     cdef mixed_entropy(self, int i):
         cdef double occ_i
         occ_i = self.occupancy[i]
-        return <double>occ_i*math.log(occ_i) + (1-occ_i)*math.log(1-occ_i)
+        return <double>occ_i*log(occ_i) + (1-occ_i)*log(1-occ_i)
 
     cdef culc_VG_energy(self, int i):
         cdef int start, end
@@ -273,7 +274,7 @@ cdef class FreeEnergy(object):
         cdef int j
         cdef double base_pair, base_rho, occ_i, occ_j, occ_inter, pair_i, rho_i, embed_i, vib_ent, VG_energy_i, alpha_int
         occ_i = self.occupancy[i]
-        vib_ent = math.log((self.gauss_width[i]*self.thermal_wavelength()**2)/self.PI)-1
+        vib_ent = log((self.gauss_width[i]*self.thermal_wavelength()**2)/self.PI)-1
         start = self.Verlet_neighbor_list[i]
         end = self.Verlet_neighbor_list[i+1]
         # 条件に合わないものはここで弾く
@@ -379,8 +380,8 @@ cdef class FreeEnergy(object):
     cdef jump_frequency(self, int i, int j):
         cdef double f_ij, gamma_ij, gamma_ji
         f_ij = self.atom_formation_inter(i, j)
-        gamma_ij = self.frequency_factor * math.exp(-(self.activation_energy-f_ij*0.5)/(self.BOLTZMANN_CONSTANT*self.temperature))
-        gamma_ji = self.frequency_factor * math.exp(-(self.activation_energy+f_ij*0.5)/(self.BOLTZMANN_CONSTANT*self.temperature))
+        gamma_ij = self.frequency_factor * exp(-(self.activation_energy-f_ij*0.5)/(self.BOLTZMANN_CONSTANT*self.temperature))
+        gamma_ji = self.frequency_factor * exp(-(self.activation_energy+f_ij*0.5)/(self.BOLTZMANN_CONSTANT*self.temperature))
         return gamma_ij, gamma_ji
 
     cdef update_concentration(self):
@@ -405,16 +406,18 @@ cdef class FreeEnergy(object):
         self.occupancy += self.time_step*change_concent
 
     cpdef main_loop(self):
+        atom_info_input.pos_input(self.lat_parameter, self.temperature)
         # 初期入力
         self.pos_init()
         self.make_Verlet_neighbor_list()
         ## while start
-        while True:
-            # 自由エネルギー算出
-            self.current_total_energy = self.culc_all_total_energy()
-            print(self.current_total_energy/self.atom_num)
-            # エネルギーの最小化
-            self.update_info()
-            # 濃度時間変化
-            self.update_concentration()
+        # while True:
+        # 自由エネルギー算出
+        self.current_total_energy = self.culc_all_total_energy()
+        print("lat parameter is ", self.lat_parameter, "free_energy/atom is ", self.current_total_energy/self.atom_num)
+        return self.current_total_energy/self.atom_num
+        # エネルギーの最小化
+        # self.update_info()
+        # 濃度時間変化
+        # self.update_concentration()
         ## while end
