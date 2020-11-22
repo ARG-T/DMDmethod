@@ -4,57 +4,59 @@ cimport numpy as np
 import csv
 import time
 import atom_info_input
-from libc.math cimport sin, cos, log, exp, M_PI
+from cython.parallel cimport prange
+from cython cimport boundscheck, wraparound
+
 
 ctypedef np.float64_t DOUBLE_t
 
+cdef extern from "<math.h>" nogil:
+    DEF DIRACS_CONSTANT = 6.5821198e-16
+    DEF PLANCK_CONSTANT = 6.62607015E-34
+    DEF BOLTZMANN_CONSTANT = 1.380649E-23
+    DEF BOLTZMANN_CONSTANT_EV = 8.6173336e-5
+    double M_PI
+    double sin(double x)
+    double cos(double x)
+    double log(double x)
+    double exp(double x)
+
 cdef class FreeEnergy(object):
 
-    cdef public double mass
-    cdef public double rc
-    cdef public double h
-    cdef public double a
-    cdef public double b1
-    cdef public double b2
-    cdef public double delta
-    cdef public double F0
-    cdef public double F2
-    cdef public double Q1
-    cdef public double Q2
+    cdef double mass
+    cdef double rc
+    cdef double h
+    cdef double a
+    cdef double b1
+    cdef double b2
+    cdef double F0
+    cdef double F2
+    cdef double Q1
+    cdef double Q2
     cdef public double lat_parameter
-    cdef public double current_
     cdef public double temperature
-    cdef public double sigma
-    cdef public double BOLTZMANN_CONSTANT
-    cdef public double PI
-    cdef public double DIRACS_CONSTANT
-    cdef public double current_total_energy
-    cdef public double activation_energy
-    cdef public double frequency_factor
-    cdef public double time_step
-    cdef public double rate
-    cdef public int atom_num
-    cdef public list E_list
-    cdef public list alpha_list
-    cdef public list r0_list_aft
-    cdef public list r0_list_bef
-    cdef public list S_list
-    cdef public list rs_list
-    cdef public list qn_list
-    cdef public double[:] x_pos
-    cdef public double[:] y_pos
-    cdef public double[:] z_pos
-    cdef public double[:] occupancy
-    cdef public double[:] gauss_width
-    cdef public double[:] rho_list
-    cdef public double[:] pair_list
-    cdef public double[:] embed_list
-    cdef public double[:] mixed_list
-    cdef public double[:] vib_ent_list
-    cdef public double[:] energy_list
-    cdef public double[:] VG_energy_list
-    cdef public list reference_neighbor_list
-    cdef public list Verlet_neighbor_list
+    cdef double sigma
+    cdef double current_total_energy
+    cdef double activation_energy
+    cdef double frequency_factor
+    cdef double time_step
+    cdef double rate
+    cdef list qn_list
+    cdef int atom_num
+    cdef double[:] x_pos
+    cdef double[:] y_pos
+    cdef double[:] z_pos
+    cdef double[:] occupancy
+    cdef double[:] gauss_width
+    cdef double[:] rho_list
+    cdef double[:] pair_list
+    cdef double[:] embed_list
+    cdef double[:] mixed_list
+    cdef double[:] vib_ent_list
+    cdef double[:] energy_list
+    cdef double[:] VG_energy_list
+    cdef list reference_neighbor_list
+    cdef list Verlet_neighbor_list
 
     def __cinit__(self, lat_parameter, temperature):
         self.mass = 1.0544429e-25
@@ -63,13 +65,6 @@ cdef class FreeEnergy(object):
         self.a = 3.80362
         self.b1 = 0.17394
         self.b2 = 5.35661*10**2
-        self.E_list = [2.01458*10**2, 0.00659288]
-        self.delta = 0.0086225
-        self.alpha_list = [2.97758, 1.54927]
-        self.r0_list_bef = [0.83591, 4.46867]
-        self.r0_list_aft = [-2.19885, -2.61984*10**2]
-        self.S_list = [4.00, 40.00, 1.15*10**3]
-        self.rs_list = [2.24, 1.80, 1.20]
         self.F0 = -2.28235
         self.F2 = 1.35535
         self.qn_list = [-1.27775, -0.86074, 1.78804, 2.97571]
@@ -92,9 +87,6 @@ cdef class FreeEnergy(object):
         self.occupancy = np.zeros(self.atom_num,dtype=float)
         self.energy_list = np.zeros(self.atom_num, dtype=float)
         self.VG_energy_list = np.zeros(self.atom_num, dtype=float)
-        self.BOLTZMANN_CONSTANT = 8.6173336e-5
-        self.PI = M_PI
-        self.DIRACS_CONSTANT = 6.5821198e-16
         self.reference_neighbor_list = [0]*(self.atom_num**2)
         self.Verlet_neighbor_list = [0]*(self.atom_num+1)
         # TODO:初期値
@@ -106,10 +98,8 @@ cdef class FreeEnergy(object):
 
     # ドブロイ波長
     cdef thermal_wavelength(self):
-        cdef double planck, boltzman, ret
-        planck = 6.62607015E-34
-        boltzman = 1.380649E-23
-        ret = 10**10*planck/((2*self.PI*self.mass*boltzman*self.temperature)**0.5)
+        cdef double ret
+        ret = 10**10*PLANCK_CONSTANT/((2*M_PI*self.mass*BOLTZMANN_CONSTANT*self.temperature)**0.5)
         return ret
 
     # 初期配置入力
@@ -128,7 +118,7 @@ cdef class FreeEnergy(object):
             self.gauss_width[i] = float(info[i][5])
 
     # 同等の位置を考慮しつつ二つの原子の距離(A)を返す
-    cdef abs_two_atom_distance(self, int i, int j):
+    cdef double abs_two_atom_distance(self, int i, int j):
         cdef double x_pos_i, y_pos_i, z_pos_i, x_pos_j, y_pos_j, z_pos_j
         cdef double dx, dy, dz, dr2
         x_pos_i, y_pos_i, z_pos_i = self.x_pos[i], self.y_pos[i], self.z_pos[i]
@@ -143,7 +133,6 @@ cdef class FreeEnergy(object):
         return dr2
 
     # 近接リスト作成
-    # 周期境界条件(~period)
     cdef make_Verlet_neighbor_list(self):
         cdef int nlist, i, j
         cdef double dr2
@@ -159,60 +148,86 @@ cdef class FreeEnergy(object):
                     self.reference_neighbor_list[nlist] = j
         self.Verlet_neighbor_list[self.atom_num] = nlist+1
 
-    cdef Morse_function(self, double r, double r_0, double a):
+    cdef double Morse_function(self, double r, double r_0, double a) nogil:
         cdef double exp_val, ret
         exp_val = exp(-a*(r-r_0))
         ret = exp_val**2-2*exp_val
         return ret
 
-    cdef cutoff_function(self, double x):
+    cdef double cutoff_function(self, double x) nogil:
         if x >= 0:
             return 0.0
         else:
-            return <double>x**4/(1+x**4)
+            return x**4/(1+x**4)
 
-    cdef alpha_int(self, int i, int j):
+    cdef double alpha_int(self, int i, int j):
         cdef double o_i, o_j
         o_i = self.gauss_width[i]
         o_j = self.gauss_width[j]
         return o_i*o_j/(o_i+o_j)
 
     # 二体間ポテンシャル
-    cpdef pair_potential(self, double r):
-        cdef double ret, E, r0, alpha, rs, Sn
-        ret = self.delta
-        for E, r0, alpha in zip(self.E_list, self.r0_list_bef, self.alpha_list):
-            ret += E*self.Morse_function(r, r0, alpha)
+    cdef double pair_potential(self, double r) nogil:
+        cdef:
+            double ret
+            double delta = 0.0086225
+            double E1 = 2.01458*10**2
+            double E2 = 0.00659288
+            double alpha1 = 2.97758
+            double alpha2 = 1.54927
+            double r01 = 0.83591
+            double r02 = 4.46867
+            double rs1 = 2.24
+            double rs2 = 1.80
+            double rs3 = 1.20
+            double S1 = 4.00
+            double S2 = 40.00
+            double S3 = 1.15*10**3
+        ret = delta
+        ret += E1*self.Morse_function(r, r01, alpha1)
+        ret += E2*self.Morse_function(r, r02, alpha2)
         ret *= self.cutoff_function(<double>(r-self.rc)/self.h)
-        for rs, Sn in zip(self.rs_list, self.S_list):
-            if rs >= r:
-                ret -= Sn*(rs-r)**4
+        if rs1 >= r:
+            ret -= S1*(rs1-r)**4
+        if rs2 >= r:
+            ret -= S2*(rs2-r)**4
+        if rs3 >= r:
+            ret -= S2*(rs2-r)**4
         return ret
 
     # 電子密度関数
-    cpdef electron_density_function(self, double r):
-        cdef double func1, func2
-        func1 = self.a*exp(-self.b1*(r-self.r0_list_aft[0])**2)
-        func2 = exp(-self.b2*(r-self.r0_list_aft[1]))
+    cdef double electron_density_function(self, double r) nogil:
+        cdef:
+            double r03 = -2.19885
+            double r04 = -2.61984*10**2
+            double func1
+            double func2
+        func1 = self.a*exp(-self.b1*(r-r03)**2)
+        func2 = exp(-self.b2*(r-r04))
         return (func1+func2)*self.cutoff_function(<double>(r-self.rc)/self.h)
 
-    cdef change_coo(self, double r, double x, double theta):
+    cdef double change_coo(self, double r, double x, double theta) nogil:
         return <double>(r**2+x**2+2*r*x*cos(theta))**0.5
 
-    cdef change_func(self, function, double r, double X, double theta, double alpha):
-        return <double>function(self.change_coo(r, X, theta))*(r**2)*sin(theta)*exp(-alpha*(r**2))
+    cdef double change_func_pair(self, double r, double X, double theta, double alpha) nogil:
+        return self.pair_potential(self.change_coo(r, X, theta))*(r**2)*sin(theta)*exp(-alpha*(r**2))
+
+    cdef double change_func_elec(self, double r, double X, double theta, double alpha) nogil:
+        return self.electron_density_function(self.change_coo(r, X, theta))*(r**2)*sin(theta)*exp(-alpha*(r**2))
 
     # 積分
-    cdef integral_sympson(self, function, int i, int j):
+    @boundscheck(False)
+    @wraparound(False)
+    cdef double integral_sympson_pair(self, int i, int j):
         cdef int n, m, i_r, j_theta
-        cdef double dx, dy, s, X, alpha, x, x1, x2, sy1, sy2, sy3, y, y1, y2, sx
+        cdef double dx, dy, s, X, alpha, x, x1, x2, sy1, sy2, sy3, y, y1, y2, sx, s1, s2, s3
         n, m = 55*2, 31*2
         dx = self.rc/(2*n)
-        dy = self.PI/(2*m)
+        dy = M_PI/(2*m)
         s = 0
         X = self.abs_two_atom_distance(i, j)**0.5
         alpha = self.alpha_int(i, j)
-        for i_r in range(n):
+        for i_r in prange(n, nogil=True):
             x = 2*i_r*dx
             x1 = x+dx
             x2 = x+2*dx
@@ -223,35 +238,55 @@ cdef class FreeEnergy(object):
                 y1 = y+dy
                 y2 = y+2*dy
 
-                s1 = (self.change_func(function, x, X, y, alpha) + 4 * self.change_func(function, x, X, y1, alpha) + self.change_func(function, x, X, y2, alpha))*dy/3
-                s2 = (self.change_func(function, x1, X, y, alpha) + 4 * self.change_func(function, x1, X, y1, alpha) + self.change_func(function, x1, X, y2, alpha))*dy/3
-                s3 = (self.change_func(function, x2, X, y, alpha) + 4 * self.change_func(function, x2, X, y1, alpha) + self.change_func(function, x2, X, y2, alpha))*dy/3
+                s1 = (self.change_func_pair(x, X, y, alpha) + 4 * self.change_func_pair(x, X, y1, alpha) + self.change_func_pair(x, X, y2, alpha))*dy/3
+                s2 = (self.change_func_pair(x1, X, y, alpha) + 4 * self.change_func_pair(x1, X, y1, alpha) + self.change_func_pair(x1, X, y2, alpha))*dy/3
+                s3 = (self.change_func_pair(x2, X, y, alpha) + 4 * self.change_func_pair(x2, X, y1, alpha) + self.change_func_pair(x2, X, y2, alpha))*dy/3
 
-                sy1 += s1
-                sy2 += s2
-                sy3 += s3
+                sy1 = sy1+s1
+                sy2 = sy2+s2
+                sy3 = sy3+s3
 
             sx = (sy1+4*sy2+sy3)*dx/3
             s += sx
 
         return s
 
-    """"
-        cdef integral_monte_carlo(self, function, int i, int j):
-        cdef int STEP, _
-        cdef double s, X, alpha, x, y
-        s = 0.0
-        X = self.abs_two_atom_dis(i, j)
+    @boundscheck(False)
+    @wraparound(False)
+    cdef double integral_sympson_elec(self, int i, int j):
+        cdef int n, m, i_r, j_theta
+        cdef double dx, dy, s, X, alpha, x, x1, x2, sy1, sy2, sy3, y, y1, y2, sx, s1, s2, s3
+        n, m = 55*2, 31*2
+        dx = self.rc/(2*n)
+        dy = M_PI/(2*m)
+        s = 0
+        X = self.abs_two_atom_distance(i, j)**0.5
         alpha = self.alpha_int(i, j)
-        STEP = 10000
-        for _ in range(STEP):
-            x, y = random.random()*self.rc, random.random()*math.pi
-            s += self.change_func(function, x, X, y, alpha)*self.rc*math.pi
+        for i_r in prange(n, nogil=True):
+            x = 2*i_r*dx
+            x1 = x+dx
+            x2 = x+2*dx
+            sy1, sy2, sy3 = 0, 0, 0
+            # theta
+            for j_theta in range(m):
+                y = 2*j_theta*dy
+                y1 = y+dy
+                y2 = y+2*dy
 
-        return <double>s/STEP
-    """
+                s1 = (self.change_func_elec(x, X, y, alpha) + 4 * self.change_func_elec(x, X, y1, alpha) + self.change_func_elec(x, X, y2, alpha))*dy/3
+                s2 = (self.change_func_elec(x1, X, y, alpha) + 4 * self.change_func_elec(x1, X, y1, alpha) + self.change_func_elec(x1, X, y2, alpha))*dy/3
+                s3 = (self.change_func_elec(x2, X, y, alpha) + 4 * self.change_func_elec(x2, X, y1, alpha) + self.change_func_elec(x2, X, y2, alpha))*dy/3
 
-    cdef embedding_function(self, double rho):
+                sy1 = sy1 + s1
+                sy2 = sy2 + s2
+                sy3 = sy3 + s3
+
+            sx = (sy1+4*sy2+sy3)*dx/3
+            s += sx
+
+        return s
+
+    cdef double embedding_function(self, double rho):
         cdef int i
         cdef double ret, qn
         ret = 0.0
@@ -263,18 +298,18 @@ cdef class FreeEnergy(object):
             ret += (self.F0 + (self.F2*(rho-1)**2)*0.5 + self.qn_list[0]*(rho-1)**3 + self.Q1*(rho-1)**4)/(1+self.Q2*(rho-1)**3)
         return ret
 
-    cdef mixed_entropy(self, int i):
+    cdef double mixed_entropy(self, int i):
         cdef double occ_i
         occ_i = self.occupancy[i]
-        return <double>occ_i*log(occ_i) + (1-occ_i)*log(1-occ_i)
+        return occ_i*log(occ_i) + (1-occ_i)*log(1-occ_i)
 
-    cdef culc_VG_energy(self, int i):
+    cdef double culc_VG_energy(self, int i):
         cdef int start, end
         cdef list j_list
         cdef int j
         cdef double base_pair, base_rho, occ_i, occ_j, occ_inter, pair_i, rho_i, embed_i, vib_ent, VG_energy_i, alpha_int
         occ_i = self.occupancy[i]
-        vib_ent = log((self.gauss_width[i]*self.thermal_wavelength()**2)/self.PI)-1
+        vib_ent = log((self.gauss_width[i]*self.thermal_wavelength()**2)/M_PI)-1
         start = self.Verlet_neighbor_list[i]
         end = self.Verlet_neighbor_list[i+1]
         # 条件に合わないものはここで弾く
@@ -286,16 +321,16 @@ cdef class FreeEnergy(object):
         for j in j_list:
             occ_j = self.occupancy[j]
             alpha_int = self.alpha_int(i, j)
-            base_pair = 2*self.PI*((alpha_int/self.PI)**1.5)*self.integral_sympson(self.pair_potential, i, j)
+            base_pair = 2*M_PI*((alpha_int/M_PI)**1.5)*self.integral_sympson_pair(i, j)
             pair_i += occ_j*base_pair
-            base_rho = 2*self.PI*((alpha_int/self.PI)**1.5)*self.integral_sympson(self.electron_density_function, i, j)
+            base_rho = 2*M_PI*((alpha_int/M_PI)**1.5)*self.integral_sympson_elec(i, j)
             rho_i += occ_j*base_rho
         embed_i = self.embedding_function(rho_i)
         # VG_energyの算出
-        VG_energy_i = 0.5*pair_i + embed_i + 1.5*self.BOLTZMANN_CONSTANT*self.temperature*vib_ent
+        VG_energy_i = 0.5*pair_i + embed_i + 1.5*BOLTZMANN_CONSTANT_EV*self.temperature*vib_ent
         return VG_energy_i
-  
-    cdef culc_all_total_energy(self):
+
+    cdef double culc_all_total_energy(self):
         cdef double VG_energy, mixed_energy
         cdef int i
         for i in range(self.atom_num):
@@ -304,7 +339,7 @@ cdef class FreeEnergy(object):
             self.mixed_list[i] = self.mixed_entropy(i)
         VG_energy = np.sum(self.VG_energy_list)
         # mixed_entropy_listの作成と総和
-        mixed_energy = self.BOLTZMANN_CONSTANT*self.temperature*np.sum(self.mixed_list)
+        mixed_energy = BOLTZMANN_CONSTANT_EV*self.temperature*np.sum(self.mixed_list)
         return VG_energy + mixed_energy
 
     # 中心差分により勾配を求める
@@ -380,8 +415,8 @@ cdef class FreeEnergy(object):
     cdef jump_frequency(self, int i, int j):
         cdef double f_ij, gamma_ij, gamma_ji
         f_ij = self.atom_formation_inter(i, j)
-        gamma_ij = self.frequency_factor * exp(-(self.activation_energy-f_ij*0.5)/(self.BOLTZMANN_CONSTANT*self.temperature))
-        gamma_ji = self.frequency_factor * exp(-(self.activation_energy+f_ij*0.5)/(self.BOLTZMANN_CONSTANT*self.temperature))
+        gamma_ij = self.frequency_factor * exp(-(self.activation_energy-f_ij*0.5)/(BOLTZMANN_CONSTANT_EV*self.temperature))
+        gamma_ji = self.frequency_factor * exp(-(self.activation_energy+f_ij*0.5)/(BOLTZMANN_CONSTANT_EV*self.temperature))
         return gamma_ij, gamma_ji
 
     cdef update_concentration(self):
