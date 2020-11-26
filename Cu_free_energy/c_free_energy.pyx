@@ -1,8 +1,6 @@
-import random
 import numpy as np
 cimport numpy as np
 import csv
-import time
 import atom_info_input
 from cython.parallel cimport prange
 from cython cimport boundscheck, wraparound
