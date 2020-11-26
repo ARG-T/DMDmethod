@@ -87,12 +87,6 @@ cdef class FreeEnergy(object):
         self.VG_energy_list = np.zeros(self.atom_num, dtype=float)
         self.reference_neighbor_list = [0]*(self.atom_num**2)
         self.Verlet_neighbor_list = [0]*(self.atom_num+1)
-        # TODO:初期値
-        self.activation_energy = 2.041761       # eV
-        # TODO:初期値
-        self.frequency_factor = 3.58128*10**14
-        self.time_step = 0.000001
-        self.rate = 0.1
 
     # ドブロイ波長
     cdef thermal_wavelength(self):
@@ -339,104 +333,6 @@ cdef class FreeEnergy(object):
         # mixed_entropy_listの作成と総和
         mixed_energy = BOLTZMANN_CONSTANT_EV*self.temperature*np.sum(self.mixed_list)
         return VG_energy + mixed_energy
-
-    # 中心差分により勾配を求める
-    cdef make_differential_list(self):
-        cdef int i
-        cdef double forward_gauss, back_gauss, forward_x, back_x, forward_y, back_y, forward_z, back_z
-        cdef np.ndarray[DOUBLE_t, ndim=1] gauss_differential_list, x_differential_list, y_differential_list, z_differential_list
-        gauss_differential_list = np.zeros(self.atom_num, dtype=float)
-        x_differential_list = np.zeros(self.atom_num, dtype=float)
-        y_differential_list = np.zeros(self.atom_num, dtype=float)
-        z_differential_list = np.zeros(self.atom_num, dtype=float)
-        for i in range(self.atom_num):
-            # ガウス幅
-            # base+sigma
-            self.gauss_width[i] += self.sigma
-            forward_gauss = self.culc_VG_energy(i)
-            # base-sigma
-            self.gauss_width[i] -= 2*self.sigma
-            back_gauss = self.culc_VG_energy(i)
-            gauss_differential_list[i] = (forward_gauss-back_gauss)/self.sigma
-            # baseに戻す
-            self.gauss_width[i] += self.sigma
-            # 位置(x)
-            self.x_pos[i] += self.sigma
-            forward_x = self.culc_VG_energy(i)
-            self.x_pos[i] -= 2*self.sigma
-            back_x = self.culc_VG_energy(i)
-            x_differential_list[i] = (forward_x-back_x)/self.sigma
-            self.x_pos[i] += self.sigma
-            # 位置(y)
-            self.y_pos[i] += self.sigma
-            forward_y = self.culc_VG_energy(i)
-            self.y_pos[i] -= 2*self.sigma
-            back_y = self.culc_VG_energy(i)
-            y_differential_list[i] = (forward_y-back_y)/self.sigma
-            self.y_pos[i] += self.sigma
-            # 位置(z)
-            self.z_pos[i] += self.sigma
-            forward_z = self.culc_VG_energy(i)
-            self.z_pos[i] -= 2*self.sigma
-            back_z = self.culc_VG_energy(i)
-            z_differential_list[i] = (forward_z-back_z)/self.sigma
-            self.z_pos[i] += self.sigma
-        return gauss_differential_list, x_differential_list, y_differential_list, z_differential_list
-
-    cdef update_info(self):
-        cdef double after_total_energy
-        cdef np.ndarray[DOUBLE_t, ndim=1] gauss_differential_list, x_differential_list, y_differential_list, z_differential_list
-        while True:
-            gauss_differential_list, x_differential_list, y_differential_list, z_differential_list = self.make_differential_list()
-            self.gauss_width -= self.rate*gauss_differential_list
-            self.x_pos -= self.rate*x_differential_list
-            self.y_pos -= self.rate*y_differential_list
-            self.z_pos -= self.rate*z_differential_list
-            after_total_energy = self.culc_all_total_energy()
-            print(after_total_energy/self.atom_num)
-            if abs(after_total_energy-self.current_total_energy) < 0.001:
-                print("break")
-                break
-            elif after_total_energy > self.current_total_energy:
-                self.gauss_width += self.rate*gauss_differential_list
-                self.x_pos += self.rate*x_differential_list
-                self.y_pos += self.rate*y_differential_list
-                self.z_pos += self.rate*z_differential_list
-                self.rate *= 0.75
-                print("continue")
-                continue
-            self.current_total_energy = after_total_energy
-
-    cdef atom_formation_inter(self, int i, int j):
-        return self.VG_energy_list[i] - self.VG_energy_list[j]
-
-    cdef jump_frequency(self, int i, int j):
-        cdef double f_ij, gamma_ij, gamma_ji
-        f_ij = self.atom_formation_inter(i, j)
-        gamma_ij = self.frequency_factor * exp(-(self.activation_energy-f_ij*0.5)/(BOLTZMANN_CONSTANT_EV*self.temperature))
-        gamma_ji = self.frequency_factor * exp(-(self.activation_energy+f_ij*0.5)/(BOLTZMANN_CONSTANT_EV*self.temperature))
-        return gamma_ij, gamma_ji
-
-    cdef update_concentration(self):
-        cdef int i, j
-        cdef double occ_i, occ_j, ret
-        cdef np.ndarray[DOUBLE_t, ndim=1] change_concent
-        change_concent = np.zeros(self.atom_num, dtype=float)
-        for i in range(self.atom_num):
-            start = self.Verlet_neighbor_list[i]
-            end = self.Verlet_neighbor_list[i+1]
-            # 条件に合わないものはここで弾く
-            if start > end:
-                return 0
-            ret = 0
-            occ_i = self.occupancy[i]
-            j_list = self.reference_neighbor_list[start:end]
-            for j in j_list:
-                occ_j = self.occupancy[j]
-                gamma_ij, gamma_ji = self.jump_frequency(i, j)
-                ret += (1-occ_i)*occ_j*gamma_ji - (1-occ_j)*occ_i*gamma_ij
-            change_concent[i] = ret
-        self.occupancy += self.time_step*change_concent
 
     cpdef main_loop(self):
         atom_info_input.pos_input(self.lat_parameter, self.temperature)
