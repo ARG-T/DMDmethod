@@ -124,6 +124,16 @@ cdef class FreeEnergy(object):
         dr2 = dx**2+dy**2+dz**2
         return dr2
 
+    # 3点のcosを算出する
+    cdef culc_cos(self, int i, int j, int k):
+        x_pos_i, y_pos_i, z_pos_i = self.x_pos[i], self.y_pos[i], self.z_pos[i]
+        x_pos_j, y_pos_j, z_pos_j = self.x_pos[j], self.y_pos[j], self.z_pos[j]
+        x_pos_k, y_pos_k, z_pos_k = self.x_pos[k], self.y_pos[k], self.z_pos[k]
+        x_ij = x_pos_j-x_pos_i
+        x_ij = min(x_ij)
+
+
+
     # 近接リスト作成
     cdef make_Verlet_neighbor_list(self):
         cdef int nlist, i, j
@@ -158,7 +168,8 @@ cdef class FreeEnergy(object):
         o_j = self.gauss_width[j]
         return o_i*o_j/(o_i+o_j)
 
-    # 二体間ポテンシャル
+    # 二体間ポテンシャル 
+    # TODO: phyをspline補間から呼び出せるようにする
     cdef double pair_potential(self, double r) nogil:
         cdef:
             double ret
@@ -188,15 +199,30 @@ cdef class FreeEnergy(object):
         return ret
 
     # 電子密度関数
-    cdef double electron_density_function(self, double r) nogil:
+    # TODO: rhoをスプライン補間から呼び出せるようにする
+    cdef double electron_density_function(self, double r, int j) nogil:
         cdef:
-            double r03 = -2.19885
-            double r04 = -2.61984*10**2
-            double func1
-            double func2
-        func1 = self.a*exp(-self.b1*(r-r03)**2)
-        func2 = exp(-self.b2*(r-r04))
-        return (func1+func2)*self.cutoff_function(<double>(r-self.rc)/self.h)
+            int start, end, k
+            double ret, mo_ret
+        start = self.Verlet_neighbor_list[i]
+        end = self.Verlet_neighbor_list[i+1]
+        j_list = self.reference_neighbor_list[start:end]
+        """
+        ret = rho(r)
+        """ 
+        mo_ret = 0
+        for k in j_list:
+            if k == j:
+                continue
+            """
+            mo_ret += 
+            """
+        return 
+
+    # modified part
+    # TODO: f, gをスプライン補間から呼び出せるようにする
+    cdef double modified_EAM(self) nogil:
+        return ret
 
     cdef double change_coo(self, double r, double x, double theta) nogil:
         return <double>(r**2+x**2+2*r*x*cos(theta))**0.5
@@ -204,12 +230,13 @@ cdef class FreeEnergy(object):
     cdef double change_func_pair(self, double r, double X, double theta, double alpha) nogil:
         return self.pair_potential(self.change_coo(r, X, theta))*(r**2)*sin(theta)*exp(-alpha*(r**2))
 
-    cdef double change_func_elec(self, double r, double X, double theta, double alpha) nogil:
-        return self.electron_density_function(self.change_coo(r, X, theta))*(r**2)*sin(theta)*exp(-alpha*(r**2))
+    cdef double change_func_elec(self, double r, double X, double theta, double alpha, int j) nogil:
+        return self.electron_density_function(self.change_coo(r, X, theta), j)*(r**2)*sin(theta)*exp(-alpha*(r**2))
 
     # 積分
-    @boundscheck(False)
-    @wraparound(False)
+    # TODO: 並列化
+    # @boundscheck(False)
+    # @wraparound(False)
     cdef double integral_sympson_pair(self, int i, int j):
         cdef int n, m, i_r, j_theta
         cdef double dx, dy, s, X, alpha, x, x1, x2, sy1, sy2, sy3, y, y1, y2, sx, s1, s2, s3
@@ -243,8 +270,10 @@ cdef class FreeEnergy(object):
 
         return s
 
-    @boundscheck(False)
-    @wraparound(False)
+    # 積分
+    # TODO: 並列化
+    # @boundscheck(False)
+    # @wraparound(False)
     cdef double integral_sympson_elec(self, int i, int j):
         cdef int n, m, i_r, j_theta
         cdef double dx, dy, s, X, alpha, x, x1, x2, sy1, sy2, sy3, y, y1, y2, sx, s1, s2, s3
@@ -265,9 +294,9 @@ cdef class FreeEnergy(object):
                 y1 = y+dy
                 y2 = y+2*dy
 
-                s1 = (self.change_func_elec(x, X, y, alpha) + 4 * self.change_func_elec(x, X, y1, alpha) + self.change_func_elec(x, X, y2, alpha))*dy/3
-                s2 = (self.change_func_elec(x1, X, y, alpha) + 4 * self.change_func_elec(x1, X, y1, alpha) + self.change_func_elec(x1, X, y2, alpha))*dy/3
-                s3 = (self.change_func_elec(x2, X, y, alpha) + 4 * self.change_func_elec(x2, X, y1, alpha) + self.change_func_elec(x2, X, y2, alpha))*dy/3
+                s1 = (self.change_func_elec(x, X, y, alpha, j) + 4 * self.change_func_elec(x, X, y1, alpha, j) + self.change_func_elec(x, X, y2, alpha, j))*dy/3
+                s2 = (self.change_func_elec(x1, X, y, alpha, j) + 4 * self.change_func_elec(x1, X, y1, alpha, j) + self.change_func_elec(x1, X, y2, alpha, j))*dy/3
+                s3 = (self.change_func_elec(x2, X, y, alpha, j) + 4 * self.change_func_elec(x2, X, y1, alpha, j) + self.change_func_elec(x2, X, y2, alpha, j))*dy/3
 
                 sy1 = sy1 + s1
                 sy2 = sy2 + s2
@@ -278,16 +307,13 @@ cdef class FreeEnergy(object):
 
         return s
 
-    cdef double embedding_function(self, double rho):
-        cdef int i
-        cdef double ret, qn
-        ret = 0.0
-        if rho <= 1:
-            ret += self.F0 + (self.F2*(rho-1)**2)*0.5
-            for i, qn in enumerate(self.qn_list):
-                ret += qn*(rho-1)**(i+3)
-        else:
-            ret += (self.F0 + (self.F2*(rho-1)**2)*0.5 + self.qn_list[0]*(rho-1)**3 + self.Q1*(rho-1)**4)/(1+self.Q2*(rho-1)**3)
+    # embedding function
+    # TODO: Uをスプライン補間から呼び出せるようにする
+    cdef embedding_function(self, double rho):
+        cdef double ret
+        """
+        ret = f(rho)
+        """
         return ret
 
     cdef double mixed_entropy(self, int i):
